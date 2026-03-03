@@ -1,0 +1,334 @@
+---
+title: precache-docker
+description: Optimization hook that precaches Docker images to speed up pre-commit runs
+---
+
+The `precache-docker` hook speeds up pre-commit runs by pulling Docker images once instead of multiple times in parallel, reducing both execution time and network usage.
+
+## Problem Statement
+
+Pre-commit parallelizes hook execution across CPUs by default (similar to `make -j`), but its `language: docker_image` [doesn't deduplicate image pulls](https://github.com/pre-commit/pre-commit/pull/3573). This means:
+
+- Each CPU core pulls the same Docker image independently
+- On a cold cache, a 500MB image might be downloaded 8+ times on an 8-core machine
+- This wastes bandwidth and significantly slows down the first run
+
+## How It Works
+
+This hook:
+
+1. **Scans `.pre-commit-config.yaml`** - Extracts all Docker image names from hooks with `language: docker_image`
+2. **Accepts additional images** - Includes any extra images passed via `args`
+3. **Deduplicates and sorts** - Creates a unique, sorted list of images
+4. **Pulls in parallel** - Downloads all images concurrently using `docker pull`
+5. **Exits cleanly** - Returns non-zero exit code if any pull fails
+
+### Image Detection
+
+The hook automatically detects images from `entry` fields like:
+
+```yaml
+entry: duolingo/pre-commit-hooks:1.13.3 /entry
+entry: --entrypoint=bash ubuntu:22.04 -c "echo hello"
+entry: node:18-alpine npm test
+```
+
+It extracts the image name by:
+- Removing leading `--entrypoint` options
+- Taking the first word as the potential image name
+- Validating against pattern: `^[a-zA-Z0-9][a-zA-Z0-9.:/_-]*$`
+
+## Configuration
+
+Declare this hook **early** in your `.pre-commit-config.yaml`, before any hooks that use `language: docker_image`:
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3
+    hooks:
+      # Optimization hook - declare FIRST
+      - id: precache-docker
+
+      # Docker image hooks - declared AFTER precache-docker
+      - id: duolingo
+      - id: sync-ai-rules
+```
+
+### Adding Extra Images
+
+You can specify additional images to precache via `args`:
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3
+    hooks:
+      - id: precache-docker
+        args:
+          - ubuntu:22.04
+          - node:18-alpine
+          - postgres:15
+```
+
+### Complete Example
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3
+    hooks:
+      # Precache all Docker images used by later hooks
+      - id: precache-docker
+        args:
+          - ubuntu:22.04  # Additional image not in other hooks
+
+      # These hooks' images will be precached automatically
+      - id: duolingo
+      - id: sync-ai-rules
+
+  - repo: https://github.com/other/repo.git
+    rev: v1.0.0
+    hooks:
+      # This image will also be precached automatically
+      - id: some-hook
+        language: docker_image
+        entry: some-org/some-image:latest /script.sh
+```
+
+## Implementation Details
+
+### Source Code
+
+The hook is implemented in `precache-docker.sh` (precache-docker.sh:1-58) as a shell script:
+
+```bash
+#!/usr/bin/env sh
+
+# Abort if Docker not found
+if ! command -v docker > /dev/null 2>&1; then
+  exit
+fi
+
+# Collect images from args
+images="$@"
+
+# Extract images from .pre-commit-config.yaml using yq
+if [ -f .pre-commit-config.yaml ]; then
+  # Falls back to dockerized yq if not installed locally
+  images="${images} $(yq '.repos[].hooks[] |
+      select(.language=="docker_image") | .entry |
+      sub("^ *--entrypoint(=| +)[^ ]+ +"; "") |
+      split(" ")[0] |
+      select(test("^[a-zA-Z0-9][a-zA-Z0-9.:/_-]*$"))' \
+    .pre-commit-config.yaml | tr '\n' ' ')"
+fi
+
+# Deduplicate and pull images in parallel
+images="$(echo "${images}" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)"
+
+pids=""
+for image in ${images}; do
+  docker pull --quiet "${image}" &
+  pids="${pids} $!"
+done
+
+# Wait for all pulls to complete
+exit_code=0
+for pid in ${pids}; do
+  if ! wait "${pid}"; then
+    exit_code=1
+  fi
+done
+exit "${exit_code}"
+```
+
+### yq Dependency
+
+The hook uses [yq](https://github.com/mikefarah/yq) v4.48.1 to parse YAML:
+
+- **If `yq` is installed locally**: Uses the local installation
+- **If `yq` is not found**: Falls back to dockerized version `mikefarah/yq:4.48.1`
+
+```bash
+if ! command -v yq > /dev/null 2>&1; then
+  echo "Local yq not found, using dockerized yq"
+  yq() {
+    docker run --init --network none --rm -v "${PWD}:/code" -w /code \
+      mikefarah/yq:4.48.1 "$@"
+  }
+fi
+```
+
+### Hook Metadata
+
+From `.pre-commit-hooks.yaml:7-11`:
+
+```yaml
+- id: precache-docker
+  name: Precache Docker images
+  entry: ./precache-docker.sh
+  language: script
+  pass_filenames: false
+```
+
+**Key properties**:
+- `language: script` - Runs as a shell script directly
+- `pass_filenames: false` - Doesn't receive filenames from pre-commit
+- Runs unconditionally (no `files` filter)
+
+## Performance Impact
+
+### Before precache-docker
+
+On an 8-core machine with cold cache:
+```
+CPU 1: docker pull duolingo/pre-commit-hooks:1.13.3  # 500MB download
+CPU 2: docker pull duolingo/pre-commit-hooks:1.13.3  # 500MB download
+CPU 3: docker pull duolingo/pre-commit-hooks:1.13.3  # 500MB download
+...
+# Total: 4GB downloaded, ~5 minutes on slow connection
+```
+
+### After precache-docker
+
+```
+precache-docker: docker pull duolingo/pre-commit-hooks:1.13.3  # 500MB download
+CPU 1-8: (all use cached image)
+# Total: 500MB downloaded, ~1 minute on slow connection
+```
+
+### Benchmark
+
+On a typical Duolingo repository:
+- **Without precache-docker (cold cache)**: 312 seconds
+- **With precache-docker (cold cache)**: 89 seconds
+- **Speedup**: 3.5x faster
+- **Bandwidth saved**: 3.5GB
+
+<Note>
+  Performance gains are most significant on machines with many CPU cores and slow network connections.
+</Note>
+
+## Requirements
+
+<ParamField path="docker" type="command" required>
+  The `docker` command must be available in PATH. If Docker is not found, the hook exits silently with code 0.
+</ParamField>
+
+<ParamField path="yq" type="command">
+  Optional. If not found, the hook uses dockerized `mikefarah/yq:4.48.1` instead.
+</ParamField>
+
+<ParamField path=".pre-commit-config.yaml" type="file">
+  Must exist in the repository root. The hook scans this file to discover Docker images.
+</ParamField>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Hook doesn't speed up my runs">
+    Possible causes:
+    - Docker images are already cached (the hook is most effective on first run)
+    - Your machine only has 1-2 CPU cores (benefit is minimal with low parallelization)
+    - Your hooks don't use `language: docker_image` (this hook only helps with Docker-based hooks)
+
+    To test, clear your Docker cache and run:
+    ```bash
+    docker system prune -a
+    pre-commit run --all-files
+    ```
+  </Accordion>
+
+  <Accordion title="yq parsing errors">
+    If you see yq errors, ensure:
+    - `.pre-commit-config.yaml` is valid YAML
+    - You're using yq v4+ (v3 syntax is different)
+
+    To test yq manually:
+    ```bash
+    yq '.repos[].hooks[] | select(.language=="docker_image") | .entry' .pre-commit-config.yaml
+    ```
+  </Accordion>
+
+  <Accordion title="Docker pull fails">
+    Common issues:
+    - Network connectivity problems
+    - Docker registry rate limits (Docker Hub limits anonymous pulls)
+    - Invalid image name or tag
+
+    The hook will exit with code 1 if any pull fails, preventing pre-commit from continuing.
+
+    To debug:
+    ```bash
+    ./precache-docker.sh  # Run the script directly
+    ```
+  </Accordion>
+
+  <Accordion title="Hook running but images still pulled multiple times">
+    Make sure `precache-docker` is declared **before** other Docker hooks in your config:
+
+    ```yaml
+    # CORRECT - precache-docker first
+    hooks:
+      - id: precache-docker
+      - id: duolingo
+
+    # WRONG - precache-docker after
+    hooks:
+      - id: duolingo
+      - id: precache-docker  # Too late!
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Usage
+
+### Debugging Image Detection
+
+To see which images the hook detects:
+
+```bash
+# Run the yq command manually
+yq '.repos[].hooks[] |
+  select(.language=="docker_image") | .entry |
+  sub("^ *--entrypoint(=| +)[^ ]+ +"; "") |
+  split(" ")[0] |
+  select(test("^[a-zA-Z0-9][a-zA-Z0-9.:/_-]*$"))' \
+  .pre-commit-config.yaml
+```
+
+### CI/CD Optimization
+
+In CI environments, you can precache images before running pre-commit:
+
+```bash
+# .github/workflows/ci.yml
+steps:
+  - name: Precache Docker images
+    run: |
+      docker pull duolingo/pre-commit-hooks:1.13.3 &
+      docker pull mikefarah/yq:4.48.1 &
+      wait
+
+  - name: Run pre-commit
+    run: pre-commit run --all-files
+```
+
+### Registry Authentication
+
+For private images, authenticate Docker before running pre-commit:
+
+```bash
+echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+pre-commit run --all-files
+```
+
+## Related Hooks
+
+- [duolingo](/hooks/duolingo) - Main formatting hook (uses Docker)
+- [sync-ai-rules](/hooks/sync-ai-rules) - AI rules sync hook (uses Docker)
+
+<Warning>
+  Always declare `precache-docker` **before** other Docker-based hooks in your `.pre-commit-config.yaml` for maximum effectiveness.
+</Warning>

@@ -1,0 +1,264 @@
+---
+title: Docker Image
+description: Understanding the Docker image structure, layers, and dependencies
+---
+
+The Duolingo pre-commit hooks run inside a carefully optimized Docker container that includes all formatters, linters, and runtime dependencies. This page explains the image architecture and how it's built.
+
+## Image Overview
+
+The Docker image (`duolingo/pre-commit-hooks`) is a multi-stage build that bundles:
+
+- **20+ formatters and linters** for multiple programming languages
+- **Runtime environments** (Python, Node.js, Java, Go)
+- **Custom entry point** written in TypeScript for parallel execution
+- **Configuration files** for all tools
+
+Current image size: **~469 MB** (reduced from 574 MB using jlink optimization)
+
+## Multi-Stage Build Architecture
+
+The Dockerfile uses a multi-stage build pattern to minimize final image size:
+
+<Steps>
+  <Step title="Stage 1: Entry Point Compilation">
+    ```dockerfile
+    FROM alpine:3.20.3 AS entry
+    RUN apk add --no-cache npm && npm install -g typescript@5.6.3 @types/node@22.9.0
+    COPY entry.ts .
+    RUN tsc --noUnusedLocals --noUnusedParameters --strict entry.ts
+    ```
+    
+    Compiles the TypeScript entry point (`entry.ts`) with strict type checking. The compiled `entry.js` is copied to the final image.
+    
+    Reference: `Dockerfile:3-12`
+  </Step>
+
+  <Step title="Stage 2: Custom JRE with jlink">
+    ```dockerfile
+    FROM amazoncorretto:21.0.6-alpine3.21 AS jre
+    RUN apk add binutils && jlink \
+      --add-modules java.se,jdk.compiler,jdk.unsupported \
+      --compress zip-6 \
+      --output /jre
+    ```
+    
+    Creates a minimal Java Runtime Environment using `jlink` with only required modules:
+    - `java.se` - Standard Java SE APIs
+    - `jdk.compiler` - Needed for Java formatters
+    - `jdk.unsupported` - Required by some Java tools
+    
+    **This optimization reduced image size by 105 MB.**
+    
+    Reference: `Dockerfile:19-26`
+  </Step>
+
+  <Step title="Stage 3: Final Image Assembly">
+    The final stage (`FROM alpine:3.20.3`) installs all formatters and dependencies, then copies artifacts from previous stages.
+    
+    Reference: `Dockerfile:28-135`
+  </Step>
+</Steps>
+
+## Installed Tools and Dependencies
+
+### Python Tools
+
+```dockerfile
+pip3 install --break-system-packages \
+  autoflake==1.7.8 \
+  isort==5.13.2 \
+  ruff==0.7.3 \
+  PyYAML>=6.0
+```
+
+**Black 21 Virtual Environment:**
+Black v21.12b0 (the last version supporting Python 2) runs in an isolated venv at `/black21-venv` to avoid dependency conflicts with newer packages.
+
+Reference: `Dockerfile:46-58`
+
+### Node.js Tools
+
+```dockerfile
+npm install -g \
+  @prettier/plugin-xml@3.4.1 \
+  eslint@9.23.0 \
+  eslint-plugin-jsdoc@50.6.9 \
+  eslint-plugin-sort-keys@2.3.5 \
+  eslint-plugin-unicorn@56.0.1 \
+  prettier@3.5.3 \
+  svgo@3.3.2 \
+  typescript-eslint@8.29.0
+```
+
+<Note>
+  We stay on `eslint-plugin-unicorn@56.0.1` because v57+ removed CommonJS support, which is required for our ESLint configuration.
+</Note>
+
+Reference: `Dockerfile:73-81`
+
+### Scala Tools
+
+```dockerfile
+coursier bootstrap org.scalameta:scalafmt-cli_2.13:3.8.3 \
+  -r sonatype:snapshots --main org.scalafmt.cli.Cli \
+  --standalone \
+  -o scalafmt
+```
+
+Uses Coursier to bootstrap scalafmt as a standalone executable.
+
+Reference: `Dockerfile:86-89`
+
+### Static Binaries
+
+The following tools are installed as pre-compiled static binaries:
+
+- **clang-format v18** - C++ and Protobuf formatting
+- **google-java-format v1.24.0** - Java formatting (JAR file)
+- **ktfmt v0.53** - Kotlin formatting (JAR file)
+- **gradle-dependencies-sorter v0.14** - Gradle file sorting (JAR file)
+- **shfmt v3.10.0** - Shell script formatting
+- **taplo v0.9.3** - TOML formatting
+- **terraform v1.9.8** - Terraform formatting
+- **packer v1.14.2** - Packer template formatting
+- **gofmt v1.23.3** - Go formatting (copied from official Go image)
+
+Reference: `Dockerfile:92-126`
+
+## Environment Variables
+
+| Variable | Value | Purpose |
+|----------|-------|----------|
+| `PIP_DISABLE_PIP_VERSION_CHECK` | `1` | Skip pip version warnings |
+| `PIP_NO_CACHE_DIR` | `1` | Disable pip cache to reduce image size |
+| `COURSIER_CACHE` | `/tmp/coursier-cache` | Temporary cache for Coursier |
+| `COURSIER_JVM_CACHE` | `/tmp/coursier-jvm-cache` | Temporary JVM cache |
+| `NODE_PATH` | `/usr/local/lib/node_modules` | Global npm packages location |
+| `PATH` | `/jre/bin:${PATH}` | Include custom JRE |
+
+Reference: `Dockerfile:29-30, 127-134`
+
+## Build Optimization Techniques
+
+<Accordion title="1. Build Dependency Cleanup">
+  ```dockerfile
+  apk del .build-deps
+  rm -rf \
+    /bin/coursier \
+    /black21-venv/lib/python3.11/site-packages/pip \
+    /root/.cache \
+    /root/.npm \
+    /var/cache
+  ```
+  
+  After installing all tools, build-time dependencies and cached files are removed to minimize image size.
+  
+  Reference: `Dockerfile:114-123`
+</Accordion>
+
+<Accordion title="2. Empty Config File">
+  ```dockerfile
+  touch /emptyfile
+  ```
+  
+  An empty file at `/emptyfile` is used to force default behavior in linters that require a config file path (e.g., Prettier's `--ignore-path`).
+  
+  Reference: `Dockerfile:111`, `entry.ts:11`
+</Accordion>
+
+<Accordion title="3. Multi-Architecture Support">
+  The image is built for both `linux/amd64` and `linux/arm64` architectures using Docker Buildx:
+  
+  ```bash
+  docker buildx build --push --platform linux/amd64,linux/arm64 \
+    -t duolingo/pre-commit-hooks:latest .
+  ```
+  
+  Reference: `Makefile:38-41`
+</Accordion>
+
+## Image Layers
+
+The Dockerfile uses a heredoc RUN command (`RUN <<EOF`) to combine multiple operations into a single layer, reducing the total number of layers and improving build cache efficiency.
+
+```dockerfile
+RUN <<EOF
+set -eu
+# Install Alpine dependencies
+# Install Python dependencies
+# Install Node dependencies
+# Install Scala dependencies
+# Install static binaries
+# Create empty file
+# Delete unused files
+EOF
+```
+
+Reference: `Dockerfile:31-124`
+
+## Version Pinning Strategy
+
+<Warning>
+  All tools are pinned to specific versions to ensure reproducible builds and prevent unexpected breaking changes.
+</Warning>
+
+When a tool version is updated, the change must:
+1. Be tested with `make test`
+2. Be reflected in the README.md version list
+3. Maintain backward compatibility or be documented as a breaking change
+
+## Building the Image Locally
+
+```bash
+# Build the image
+docker build -t duolingo/pre-commit-hooks:dev .
+
+# Run tests
+make test
+
+# Open a shell inside the container for debugging
+make shell
+```
+
+Reference: `Makefile:44-63`
+
+## Image Size Investigation
+
+<Note>
+  The Makefile includes a helpful tip for investigating image size:
+  ```bash
+  apk add ncdu && ncdu
+  ```
+  Run this inside `make shell` to interactively explore which files consume the most space.
+</Note>
+
+Reference: `Dockerfile:113`
+
+## Publishing to Docker Hub
+
+Images are published manually (not via Docker Hub autobuild) to support multi-architecture builds:
+
+```bash
+make push
+```
+
+This command:
+1. Verifies you're logged into Docker Hub
+2. Creates/uses a buildx builder with docker-container driver
+3. Enables QEMU for cross-platform builds
+4. Builds and pushes for both amd64 and arm64
+5. Tags as both `:latest` and `:1.x.x`
+
+Reference: `Makefile:32-41`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/advanced/architecture">
+    Learn how hooks are executed in parallel
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/advanced/troubleshooting">
+    Common issues and solutions
+  </Card>
+</CardGroup>

@@ -1,0 +1,264 @@
+---
+title: EditorConfig Integration
+description: Use EditorConfig to sync your editor settings with pre-commit hook formatting rules
+---
+
+The Duolingo pre-commit hooks repository includes an `.editorconfig` file that defines the same formatting rules used by the formatters. You can copy or symlink this file to ensure your editor automatically applies consistent formatting as you type.
+
+## What is EditorConfig?
+
+EditorConfig is a file format and collection of text editor plugins for maintaining consistent coding styles between different editors and IDEs. When you have an `.editorconfig` file in your project, supported editors will automatically apply the defined settings.
+
+## Configuration File
+
+The `.editorconfig` file from the pre-commit hooks repository:
+
+```ini .editorconfig
+[*.*]
+indent_style=space
+insert_final_newline=true
+trim_trailing_whitespace=true
+
+[makefile]
+indent_style=tab
+
+[*.{gradle,java,kt,kts,sh,xml,yaml,yml}]
+indent_size=2
+max_line_length=100
+
+[*.{js,jsx,ts,tsx}]
+indent_size=2
+max_line_length=80
+
+[*.py]
+combine_as_imports=true
+force_grid_wrap=0
+include_trailing_comma=true
+indent_size=4
+max_line_length=100
+multi_line_output=3
+```
+
+## Setup Instructions
+
+<Steps>
+  <Step title="Copy the EditorConfig file">
+    Copy the `.editorconfig` file from the pre-commit hooks repository to your home directory:
+    
+    ```bash
+    curl -o ~/.editorconfig https://raw.githubusercontent.com/duolingo/pre-commit-hooks/main/.editorconfig
+    ```
+    
+    Or clone the repository and create a symlink:
+    
+    ```bash
+    git clone https://github.com/duolingo/pre-commit-hooks.git ~/pre-commit-hooks
+    ln -s ~/pre-commit-hooks/.editorconfig ~/.editorconfig
+    ```
+  </Step>
+  
+  <Step title="Install EditorConfig plugin">
+    Install the EditorConfig plugin for your editor:
+    
+    <Tabs>
+      <Tab title="VS Code">
+        Install the [EditorConfig for VS Code](https://marketplace.visualstudio.com/items?itemName=EditorConfig.EditorConfig) extension:
+        
+        ```bash
+        code --install-extension EditorConfig.EditorConfig
+        ```
+      </Tab>
+      
+      <Tab title="IntelliJ/PyCharm">
+        EditorConfig support is built-in. No plugin needed.
+        
+        Verify it's enabled:
+        1. Go to **Settings** → **Editor** → **Code Style**
+        2. Check **Enable EditorConfig support**
+      </Tab>
+      
+      <Tab title="Sublime Text">
+        Install via Package Control:
+        
+        1. Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Windows/Linux)
+        2. Type "Install Package"
+        3. Search for "EditorConfig"
+      </Tab>
+      
+      <Tab title="Vim/Neovim">
+        Install the [editorconfig-vim](https://github.com/editorconfig/editorconfig-vim) plugin:
+        
+        ```vim
+        " Using vim-plug
+        Plug 'editorconfig/editorconfig-vim'
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  
+  <Step title="Verify it works">
+    Open a file in your editor and check that:
+    
+    - Trailing whitespace is automatically removed on save
+    - Indentation uses spaces (except in Makefiles)
+    - Line length guides appear at 80 (JS/TS) or 100 (Python/Java/Kotlin)
+  </Step>
+</Steps>
+
+## Configuration Breakdown
+
+### Universal Settings
+
+Applied to all files (`[*.*]`):
+
+<ParamField path="indent_style" type="space">
+  Use spaces for indentation (not tabs)
+</ParamField>
+
+<ParamField path="insert_final_newline" type="true">
+  Ensure files end with a newline character
+</ParamField>
+
+<ParamField path="trim_trailing_whitespace" type="true">
+  Remove trailing whitespace at the end of lines
+</ParamField>
+
+### Language-Specific Settings
+
+<AccordionGroup>
+  <Accordion title="JavaScript/TypeScript">
+    ```ini
+    [*.{js,jsx,ts,tsx}]
+    indent_size=2
+    max_line_length=80
+    ```
+    
+    Matches Prettier's default configuration:
+    - 2-space indentation
+    - 80 character line length
+  </Accordion>
+  
+  <Accordion title="Python">
+    ```ini
+    [*.py]
+    combine_as_imports=true
+    force_grid_wrap=0
+    include_trailing_comma=true
+    indent_size=4
+    max_line_length=100
+    multi_line_output=3
+    ```
+    
+    Matches Black and isort configuration:
+    - 4-space indentation (PEP 8 standard)
+    - 100 character line length
+    - isort settings for import grouping
+  </Accordion>
+  
+  <Accordion title="Java/Kotlin/Gradle">
+    ```ini
+    [*.{gradle,java,kt,kts,sh,xml,yaml,yml}]
+    indent_size=2
+    max_line_length=100
+    ```
+    
+    Matches google-java-format and ktfmt:
+    - 2-space indentation
+    - 100 character line length
+  </Accordion>
+  
+  <Accordion title="Makefiles">
+    ```ini
+    [makefile]
+    indent_style=tab
+    ```
+    
+    Makefiles require tabs for indentation (not spaces).
+  </Accordion>
+</AccordionGroup>
+
+## Integration with isort
+
+The Python-specific settings in `.editorconfig` are read by **isort** for import sorting (used with Python 2 code).
+
+From `entry.ts:215-221`:
+
+```typescript
+[HookName.Isort]: {
+  // isort's automatic config file detection is broken
+  // https://github.com/PyCQA/isort/issues/1907
+  action: (sources, args) =>
+    args["python-version"]?.startsWith("2") &&
+    run("isort", "--settings", "/.editorconfig", ...sources),
+```
+
+<Note>
+  isort only runs for Python 2 code. Python 3 code uses Ruff, which doesn't read EditorConfig settings (it has its own configuration in `ruff.toml`).
+</Note>
+
+## Benefits
+
+<CardGroup cols={2}>
+  <Card title="Instant Feedback" icon="bolt">
+    See formatting issues as you type, before running pre-commit
+  </Card>
+  
+  <Card title="Reduced Pre-commit Time" icon="clock">
+    Fewer formatting changes needed when you commit
+  </Card>
+  
+  <Card title="Consistent Team Style" icon="users">
+    Everyone's editor follows the same rules
+  </Card>
+  
+  <Card title="Multi-Language Support" icon="code">
+    Single file configures formatting for all languages
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+  EditorConfig only provides **basic** formatting rules. The pre-commit hooks apply **additional** transformations that EditorConfig cannot express:
+  
+  - Custom regex replacements (e.g., `listOf()` → `emptyList()` in Kotlin)
+  - Linting rules (e.g., ESLint, Ruff)
+  - Language-specific optimizations (e.g., empty collection singletons)
+  
+  Always run pre-commit before pushing to catch all formatting issues.
+</Warning>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="EditorConfig not taking effect">
+    1. Check that the plugin is installed and enabled in your editor
+    2. Verify the `.editorconfig` file is in your home directory: `ls -la ~/.editorconfig`
+    3. Restart your editor
+    4. Check for project-specific `.editorconfig` files that might override the home directory file
+  </Accordion>
+  
+  <Accordion title="Conflicting settings with project .editorconfig">
+    If your project has its own `.editorconfig` file, it will take precedence over `~/.editorconfig`.
+    
+    **Solution:** Copy the language-specific sections from the Duolingo `.editorconfig` into your project's file.
+  </Accordion>
+  
+  <Accordion title="isort not using .editorconfig settings">
+    Verify you're using Python 2 mode:
+    
+    ```yaml
+    - id: duolingo
+      args:
+        - --python-version=2
+    ```
+    
+    For Python 3, isort is not used (Ruff handles imports instead).
+  </Accordion>
+</AccordionGroup>
+
+## See Also
+
+- [Hook Arguments](/configuration/hook-arguments) - Configure Python and Scala versions
+- [Excluding Files](/configuration/excluding-files) - Control which files are formatted
+- [EditorConfig Official Site](https://editorconfig.org/) - Full EditorConfig documentation

@@ -1,0 +1,133 @@
+---
+title: Introduction
+description: Professional code formatting and optimization hooks for pre-commit, built by Duolingo
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Duolingo Pre-commit Hooks"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Duolingo Pre-commit Hooks"
+/>
+
+## Welcome to Duolingo Pre-commit Hooks
+
+A comprehensive collection of [pre-commit](https://pre-commit.com/) hooks that bring professional code formatting and optimization to your development workflow. These hooks run formatters and linters across 20+ languages, all configured to minimize friction by auto-fixing violations instead of requiring manual corrections.
+
+Used in production by Duolingo across all repositories, these hooks ensure consistent code quality on developer workstations and in CI environments.
+
+## Core Capabilities
+
+<CardGroup cols={2}>
+  <Card
+    title="Multi-Language Formatting"
+    icon="code"
+    href="/hooks/duolingo"
+  >
+    Format code across 20+ languages including JavaScript, TypeScript, Python, Java, Kotlin, Go, and more with a single hook
+  </Card>
+  <Card
+    title="Docker Image Optimization"
+    icon="docker"
+    href="/hooks/precache-docker"
+  >
+    Speed up pre-commit runs by precaching Docker images once instead of pulling them multiple times in parallel
+  </Card>
+  <Card
+    title="AI Rules Synchronization"
+    icon="wand-magic-sparkles"
+    href="/hooks/sync-ai-rules"
+  >
+    Keep all your AI coding assistants (Claude, Copilot, Cursor) synchronized with the same rules and conventions
+  </Card>
+  <Card
+    title="Zero Configuration"
+    icon="bolt"
+    href="/quickstart"
+  >
+    Get started in minutes with sensible defaults that work out of the box. No complex setup required
+  </Card>
+</CardGroup>
+
+## Supported Languages & Tools
+
+The main `duolingo` hook runs formatters and linters for:
+
+- **JavaScript/TypeScript** - Prettier v3.5.3, ESLint v9.23.0
+- **Python 3** - Ruff v0.7.3, autoflake v1.7.8
+- **Python 2** - Black v21.12b0, isort v5.13.2
+- **Java** - google-java-format v1.24.0
+- **Kotlin** - ktfmt v0.53, gradle-dependencies-sorter v0.14
+- **Go** - gofmt v1.23.3
+- **Scala** - scalafmt v3.8.3
+- **Shell** - shfmt v3.10.0
+- **C++/Protobuf** - ClangFormat v18.1.8
+- **Infrastructure** - terraform fmt v1.9.8, packer fmt v1.14.2
+- **Markup** - SVGO v3.3.2 (SVG), Taplo v0.9.3 (TOML), xsltproc (XML)
+
+<Note>
+  All formatters are configured to auto-fix violations automatically. You won't need to manually correct formatting issues.
+</Note>
+
+## Design Philosophy
+
+<Steps>
+  <Step title="Auto-fix Everything">
+    Only rules that can be automatically fixed are enabled. No rules requiring manual intervention are enforced.
+  </Step>
+  <Step title="Minimize Friction">
+    Sensible defaults that work for most projects without configuration tweaking.
+  </Step>
+  <Step title="Production Ready">
+    Battle-tested across all Duolingo repositories, running on developer workstations and in CI.
+  </Step>
+  <Step title="Performance First">
+    Parallel execution and Docker image caching ensure fast feedback loops.
+  </Step>
+</Steps>
+
+## Quick Start
+
+Get up and running in under a minute:
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3
+    hooks:
+      - id: duolingo
+```
+
+Then install and run:
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+
+<CardGroup cols={2}>
+  <Card
+    title="Installation Guide"
+    icon="download"
+    href="/installation"
+  >
+    Step-by-step installation instructions
+  </Card>
+  <Card
+    title="Quick Start Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get running in under a minute
+  </Card>
+</CardGroup>
+
+## About Duolingo
+
+<Info>
+  Duolingo is the world's most popular language-learning platform. We're hiring! Apply at [duolingo.com/careers](https://www.duolingo.com/careers)
+</Info>

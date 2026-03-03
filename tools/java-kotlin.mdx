@@ -1,0 +1,263 @@
+---
+title: Java & Kotlin
+description: google-java-format, ktfmt, and gradle-dependencies-sorter for JVM languages
+---
+
+Java and Kotlin files are formatted with industry-standard tools from Google and Facebook, plus Gradle dependency sorting.
+
+## google-java-format
+
+Google's Java formatter ensures consistent code style across Java projects.
+
+### Version
+
+- **google-java-format**: 1.24.0
+
+### File Pattern
+
+- `*.java` - Java source files
+
+### Configuration
+
+Uses Google's default style with in-place replacement:
+
+```bash
+java -jar /google-java-format --replace
+```
+
+### Execution
+
+Runs after `sed` transformations (entry.ts:201-206):
+
+```typescript
+action: sources =>
+  run("java", "-jar", "/google-java-format", "--replace", ...sources)
+```
+
+## ktfmt
+
+Facebook's Kotlin formatter with Google style configuration.
+
+### Version
+
+- **ktfmt**: 0.53
+
+### File Patterns
+
+- `*.kt` - Kotlin files
+- `*.kts` - Kotlin script files
+
+### Configuration
+
+```bash
+java -Xmx256m -jar /ktfmt --google-style
+```
+
+### Memory Management
+
+ktfmt includes special memory optimizations to prevent OOM errors:
+
+#### Heap Size Limit
+
+```typescript
+"-Xmx256m"  // Cap at 256MB per process
+```
+
+<Info>
+  **Why cap memory?** By default, ktfmt was OOMing on 36-core CI servers with errors like "Native memory allocation (mmap) failed to map 3697278976 bytes". Capping at 256MB prevents this while only increasing format time by ~12% (64s → 72s on test repos).
+</Info>
+
+#### Batch Processing
+
+Files are processed in batches to avoid memory issues (entry.ts:226-244):
+
+```typescript
+const MAX_FILES_PER_PROCESS = 200;
+for (let i = 0; i < sources.length; i += MAX_FILES_PER_PROCESS) {
+  await run(
+    "java",
+    "-Xmx256m",
+    "-jar",
+    "/ktfmt",
+    "--google-style",
+    ...sources.slice(i, i + MAX_FILES_PER_PROCESS),
+  );
+}
+```
+
+### Output Suppression
+
+ktfmt is verbose and outputs "Done formatting" for every file. This noise is automatically filtered out (entry.ts:503-504):
+
+```typescript
+/\bDone formatting .+\.kts?$/
+```
+
+## gradle-dependencies-sorter
+
+Sorts dependencies in Gradle build files alphabetically for easier maintenance.
+
+### Version
+
+- **gradle-dependencies-sorter**: 0.14
+
+### File Patterns
+
+- `build.gradle.kts` - Kotlin Gradle files **only**
+
+<Warning>
+  **Groovy files excluded**: `build.gradle` (Groovy) files are intentionally skipped because some language features like variables can cause parsing errors.
+</Warning>
+
+### Configuration
+
+```bash
+java -jar /gradle-dependencies-sorter
+```
+
+### Execution
+
+Runs after `sed` transformations (entry.ts:207-214):
+
+```typescript
+action: sources =>
+  run("java", "-jar", "/gradle-dependencies-sorter", ...sources),
+include: /build\.gradle\.kts$/,
+```
+
+## JRE Information
+
+All Java tools run on a custom minimal JRE to reduce image size:
+
+### Base Image
+
+- **Amazon Corretto**: 21.0.6-alpine3.21
+
+### Custom JRE Modules
+
+Built with `jlink` including only required modules (Dockerfile:14-26):
+
+```dockerfile
+jlink \
+  --add-modules java.se,jdk.compiler,jdk.unsupported \
+  --compress zip-6 \
+  --no-header-files \
+  --no-man-pages \
+  --output /jre \
+  --strip-debug
+```
+
+<Info>
+  This custom JRE reduced the Docker image size from **574 MB to 469 MB** (~18% reduction).
+</Info>
+
+## Example Transformations
+
+<Tabs>
+  <Tab title="Java Formatting">
+    google-java-format applies Google's style guide:
+    
+    ```java
+    // Before
+    public class Example {
+        public void method(String arg1,String arg2,String arg3) {
+            if(condition){doSomething();}
+        }
+    }
+    
+    // After
+    public class Example {
+      public void method(String arg1, String arg2, String arg3) {
+        if (condition) {
+          doSomething();
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Kotlin - Empty Collections">
+    Custom `sed` transformations (entry.ts:336-344):
+    
+    ```kotlin
+    // Before
+    val arr = arrayOf()
+    val list = listOf()
+    val map = mapOf()
+    val seq = sequenceOf()
+    val set = setOf()
+    
+    // After
+    val arr = emptyArray()
+    val list = emptyList()
+    val map = emptyMap()
+    val seq = emptySequence()
+    val set = emptySet()
+    ```
+    
+    <Note>
+      This optimization avoids unnecessary allocations. Similar to Python's empty tuple `()` being a singleton.
+    </Note>
+  </Tab>
+  <Tab title="Kotlin - Constructor Keyword">
+    ```kotlin
+    // Before
+    class Person constructor(val name: String)
+    
+    // After
+    class Person(val name: String)
+    ```
+    
+    The `constructor` keyword is removed when unnecessary (entry.ts:347).
+  </Tab>
+  <Tab title="Kotlin Formatting">
+    ktfmt applies Google style:
+    
+    ```kotlin
+    // Before
+    class Example(val name:String,val age:Int){
+        fun greet()=println("Hello $name")
+    }
+    
+    // After
+    class Example(val name: String, val age: Int) {
+      fun greet() = println("Hello $name")
+    }
+    ```
+  </Tab>
+  <Tab title="Gradle Dependencies">
+    gradle-dependencies-sorter alphabetizes dependencies:
+    
+    ```kotlin
+    // Before - build.gradle.kts
+    dependencies {
+        implementation("org.springframework:spring-web:5.3.0")
+        implementation("com.google.guava:guava:30.1-jre")
+        testImplementation("junit:junit:4.13")
+        implementation("org.apache.commons:commons-lang3:3.12.0")
+    }
+    
+    // After
+    dependencies {
+        implementation("com.google.guava:guava:30.1-jre")
+        implementation("org.apache.commons:commons-lang3:3.12.0")
+        implementation("org.springframework:spring-web:5.3.0")
+        testImplementation("junit:junit:4.13")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Performance Considerations
+
+### ktfmt Optimization Strategy
+
+1. **Memory cap**: `-Xmx256m` prevents OOM on large servers
+2. **Batch processing**: Max 200 files per process
+3. **Sequential batches**: Processes run sequentially to avoid memory spikes
+
+### Gradle Dependencies
+
+Only Kotlin DSL files are processed due to parsing reliability:
+
+- ✅ `build.gradle.kts` - Supported
+- ❌ `build.gradle` - Skipped (variables cause parsing errors)

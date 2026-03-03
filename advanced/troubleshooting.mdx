@@ -1,0 +1,633 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for pre-commit hooks
+---
+
+This guide covers common issues you might encounter when using the Duolingo pre-commit hooks and how to resolve them.
+
+## Installation Issues
+
+### Docker Not Running
+
+<Warning>
+  The hooks require Docker to be running since they use `language: docker_image`.
+</Warning>
+
+**Error message:**
+```
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock
+```
+
+**Solution:**
+<Steps>
+  <Step title="Start Docker">
+    ```bash
+    # macOS
+    open -a Docker
+    
+    # Linux
+    sudo systemctl start docker
+    ```
+  </Step>
+  
+  <Step title="Verify Docker is running">
+    ```bash
+    docker ps
+    ```
+  </Step>
+  
+  <Step title="Run pre-commit again">
+    ```bash
+    pre-commit run --all-files
+    ```
+  </Step>
+</Steps>
+
+### Image Pull Failures
+
+**Error message:**
+```
+Error response from daemon: pull access denied for duolingo/pre-commit-hooks
+```
+
+**Solutions:**
+
+<Accordion title="Check image tag exists">
+  Verify the revision in `.pre-commit-config.yaml` matches a published release:
+  
+  ```yaml
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3  # ← Check this version exists
+  ```
+  
+  See available versions at: https://github.com/duolingo/pre-commit-hooks/releases
+</Accordion>
+
+<Accordion title="Clear pre-commit cache">
+  ```bash
+  pre-commit clean
+  pre-commit install-hooks
+  ```
+</Accordion>
+
+<Accordion title="Check network connectivity">
+  ```bash
+  docker pull duolingo/pre-commit-hooks:latest
+  ```
+  
+  If this fails, check your network connection and Docker Hub access.
+</Accordion>
+
+### Slow First Run
+
+**Issue:** First run takes a long time to download the Docker image.
+
+**Expected behavior:** The Docker image is ~469 MB and includes many tools. First-time download can take 2-10 minutes depending on your connection.
+
+**Solutions:**
+
+<Steps>
+  <Step title="Use precache-docker hook">
+    Add the `precache-docker` hook to avoid parallel image pulls:
+    
+    ```yaml
+    - repo: https://github.com/duolingo/pre-commit-hooks.git
+      rev: 1.13.3
+      hooks:
+        - id: precache-docker  # Add this first
+        - id: duolingo
+    ```
+  </Step>
+  
+  <Step title="Precache manually">
+    ```bash
+    docker pull duolingo/pre-commit-hooks:1.13.3
+    ```
+  </Step>
+</Steps>
+
+## Memory Issues
+
+### Java Out of Memory (ktfmt)
+
+**Error message:**
+```
+There is insufficient memory for the Java Runtime Environment to continue.
+Native memory allocation (mmap) failed to map 3697278976 bytes
+```
+
+**Cause:** ktfmt can consume excessive memory when processing many Kotlin files simultaneously.
+
+**Built-in mitigation:**
+
+The hook already includes protections:
+1. **Memory limit:** `-Xmx256m` caps Java heap at 256 MB
+2. **Batch processing:** Max 200 files per process
+
+Reference: `entry.ts:228-244`
+
+**If you still see OOM errors:**
+
+<Accordion title="Reduce batch size">
+  Fork the repo and modify `entry.ts`:
+  
+  ```typescript
+  // Change from 200 to a smaller number
+  const MAX_FILES_PER_PROCESS = 100;
+  ```
+</Accordion>
+
+<Accordion title="Increase Docker memory limit">
+  In Docker Desktop:
+  1. Settings → Resources → Memory
+  2. Increase from 2GB to 4GB or higher
+  3. Apply & Restart
+</Accordion>
+
+<Accordion title="Process fewer files at once">
+  ```bash
+  # Instead of --all-files
+  pre-commit run --files src/**/*.kt
+  ```
+</Accordion>
+
+### General Docker Memory Issues
+
+**Error message:**
+```
+Docker container killed (exit code 137)
+```
+
+**Solution:** Increase Docker's memory allocation (see ktfmt section above).
+
+## Parsing Errors
+
+### Prettier Parsing Errors
+
+**Error message:**
+```
+Prettier (JS): SyntaxError: Unexpected token
+```
+
+**Causes:**
+- Invalid JavaScript/TypeScript syntax
+- Unsupported language features
+- Wrong file extension
+
+**Solutions:**
+
+<Steps>
+  <Step title="Fix syntax errors">
+    Run your language's compiler/linter:
+    ```bash
+    # TypeScript
+    npx tsc --noEmit
+    
+    # JavaScript
+    npx eslint yourfile.js
+    ```
+  </Step>
+  
+  <Step title="Check Prettier version compatibility">
+    The hook uses Prettier 3.5.3. Check if your syntax is supported:
+    ```bash
+    # Test locally
+    npx prettier@3.5.3 --check yourfile.js
+    ```
+  </Step>
+  
+  <Step title="Exclude the file if necessary">
+    ```yaml
+    - id: duolingo
+      exclude: ^problematic-file\.js$
+    ```
+  </Step>
+</Steps>
+
+### ESLint Parsing Errors
+
+**Error message:**
+```
+ESLint: Parsing error: Unexpected token
+```
+
+**Note:** The hook only cares about auto-fixable violations. Parsing errors indicate invalid syntax.
+
+**Solution:**
+
+<Accordion title="Verify TypeScript/JavaScript syntax">
+  ```bash
+  npx tsc --noEmit
+  ```
+</Accordion>
+
+<Accordion title="Check for minified files">
+  Minified files are auto-excluded via:
+  ```typescript
+  exclude: /\bmin\b|\.(custom|pack)\./
+  ```
+  
+  If your minified file doesn't match this pattern, add it to your exclude config.
+  
+  Reference: `entry.ts:14, 192`
+</Accordion>
+
+### Python Parsing Errors
+
+**Error message:**
+```
+Ruff: SyntaxError: invalid syntax
+Black: Cannot parse
+```
+
+**Solutions:**
+
+<Steps>
+  <Step title="Verify Python version argument">
+    For Python 2 code:
+    ```yaml
+    - id: duolingo
+      args:
+        - --python-version=2
+    ```
+  </Step>
+  
+  <Step title="Check Python syntax">
+    ```bash
+    python -m py_compile yourfile.py
+    ```
+  </Step>
+  
+  <Step title="Check Ruff compatibility">
+    Ruff targets Python 3.7+ by default (configurable in `ruff.toml`).
+    
+    Reference: `ruff.toml:4`
+  </Step>
+</Steps>
+
+### Kotlin Parsing Errors
+
+**Error message:**
+```
+ktfmt: error: Unexpected character
+```
+
+**Solutions:**
+
+<Accordion title="Verify Kotlin syntax">
+  ```bash
+  kotlinc -script yourfile.kt
+  ```
+</Accordion>
+
+<Accordion title="Check ktfmt version compatibility">
+  The hook uses ktfmt 0.53. Ensure your Kotlin version is compatible.
+  
+  Reference: `Dockerfile:95`
+</Accordion>
+
+### Scala Parsing Errors
+
+**Error message:**
+```
+scalafmt: error: Invalid Scala syntax
+```
+
+**Solutions:**
+
+<Steps>
+  <Step title="Specify Scala version">
+    ```yaml
+    - id: duolingo
+      args:
+        - --scala-version=3
+    ```
+    
+    Default is Scala 2.12.
+  </Step>
+  
+  <Step title="Verify Scala syntax">
+    ```bash
+    scalac yourfile.scala
+    ```
+  </Step>
+</Steps>
+
+## File Processing Issues
+
+### Files Not Being Formatted
+
+**Issue:** Some files aren't being processed by the hook.
+
+**Debugging steps:**
+
+<Steps>
+  <Step title="Check global excludes">
+    These paths are never processed:
+    - `.claude/skills/.generated/`
+    - `build/`
+    - `node_modules/`
+    - `AGENTS.md`
+    - `copilot-instructions.md`
+    - `gradlew`
+    
+    Reference: `entry.ts:485-495`
+  </Step>
+  
+  <Step title="Check pre-commit's file type detection">
+    ```bash
+    pre-commit run --all-files --verbose
+    ```
+    
+    Look for which files are passed to the hook.
+  </Step>
+  
+  <Step title="Verify file extensions">
+    Check if your file extension matches the hook's `include` patterns.
+    
+    Example: `.jsx` matches `/\.[jt]sx?$/`, but `.cjs` does not.
+    
+    Reference: `entry.ts:193, 254, 263`
+  </Step>
+  
+  <Step title="Check your exclude patterns">
+    ```yaml
+    - id: duolingo
+      exclude: ^(vendor|generated)/
+    ```
+  </Step>
+</Steps>
+
+### Gradle Kotlin Files Not Formatted
+
+**Issue:** `.gradle.kts` files are formatted but `.gradle` (Groovy) files are not.
+
+**Expected behavior:** Groovy Gradle files are intentionally excluded because variables and other language features can cause parsing errors.
+
+Reference: `entry.ts:210-213`
+
+**Solution:** Convert to Kotlin DSL (`.gradle.kts`) or format Groovy files manually.
+
+### Shell Scripts Not Detected
+
+**Issue:** Shell script not being formatted by shfmt.
+
+**Detection logic:**
+
+1. Files with extension: `.sh`, `.bash`, `.zsh`
+2. Files with shebang: `#!/bin/bash`, `#!/bin/sh`, `#!/bin/zsh`
+
+Reference: `entry.ts:380-405`
+
+**Solutions:**
+
+<Accordion title="Add proper extension">
+  ```bash
+  mv script script.sh
+  ```
+</Accordion>
+
+<Accordion title="Add shebang line">
+  ```bash
+  #!/bin/bash
+  # rest of script...
+  ```
+</Accordion>
+
+<Accordion title="Exclude .proto files">
+  If you have binary `.proto` files, they're automatically excluded to prevent corruption.
+  
+  Reference: `entry.ts:426`
+</Accordion>
+
+## Performance Issues
+
+### Hook Takes Too Long
+
+**Expected timing:**
+- Cold run (first time): 2-10 minutes (Docker image download)
+- Warm run (all files): 10-60 seconds depending on repo size
+- Incremental (changed files): 1-5 seconds
+
+**Optimization strategies:**
+
+<Accordion title="Use precache-docker hook">
+  Prevents parallel image pulls on cold cache:
+  
+  ```yaml
+  - id: precache-docker
+  ```
+  
+  Reference: `README.md:37-41`
+</Accordion>
+
+<Accordion title="Limit files processed">
+  ```yaml
+  - id: duolingo
+    files: ^src/  # Only process src/ directory
+  ```
+</Accordion>
+
+<Accordion title="Skip in CI for non-code changes">
+  ```yaml
+  # In CI, only run on PR commits that touch code
+  - id: duolingo
+    files: \.(py|js|ts|java|kt|go|scala)$
+  ```
+</Accordion>
+
+<Accordion title="Run on subset of CPUs">
+  ```bash
+  # pre-commit uses all CPUs by default
+  # Limit to 4 processes:
+  PRE_COMMIT_CONCURRENCY=4 pre-commit run --all-files
+  ```
+</Accordion>
+
+### Terraform Race Condition
+
+**Issue:** Terraform files sometimes get deleted or corrupted.
+
+**Cause:** When two sibling `.tf` files are assigned to different parallel processes, they can both format the same directory, causing a race condition.
+
+**Mitigation:** The hook processes Terraform files individually instead of by directory.
+
+Reference: `entry.ts:455-470`
+
+**If you still see issues:**
+
+<Accordion title="Disable parallelization for Terraform">
+  This isn't directly supported, but you can:
+  1. Run Terraform formatting separately
+  2. Exclude `.tf` from the main hook
+  
+  ```yaml
+  - id: duolingo
+    exclude: \.tf$
+  ```
+</Accordion>
+
+## Hook Configuration Issues
+
+### "Hook ... has migrated" Warning
+
+**Warning message:**
+```
+[WARNING] Hook ... has migrated to ...
+```
+
+**Cause:** You're using an old version in your `rev:` field.
+
+**Solution:**
+
+```yaml
+- repo: https://github.com/duolingo/pre-commit-hooks.git
+  rev: 1.13.3  # ← Update to latest version
+```
+
+Check releases: https://github.com/duolingo/pre-commit-hooks/releases
+
+### Hook Fails with "Image not found"
+
+**Error message:**
+```
+Repository ... not found or permission denied
+```
+
+**Solutions:**
+
+<Steps>
+  <Step title="Verify revision">
+    Ensure the `rev` matches a Git tag:
+    ```bash
+    git ls-remote --tags https://github.com/duolingo/pre-commit-hooks.git
+    ```
+  </Step>
+  
+  <Step title="Update pre-commit">
+    ```bash
+    pre-commit autoupdate
+    ```
+  </Step>
+  
+  <Step title="Clear cache">
+    ```bash
+    pre-commit clean
+    pre-commit install-hooks
+    ```
+  </Step>
+</Steps>
+
+## Advanced Debugging
+
+### Enable Verbose Output
+
+```bash
+pre-commit run --all-files --verbose
+```
+
+This shows:
+- Which files are passed to each hook
+- Exact commands being run
+- Full output from each tool
+
+### Run Hook Directly in Docker
+
+<Steps>
+  <Step title="Open shell in container">
+    ```bash
+    docker run --rm -it \
+      -v "$(pwd):/src" \
+      -w /src \
+      duolingo/pre-commit-hooks:1.13.3 \
+      sh
+    ```
+  </Step>
+  
+  <Step title="Run entry point manually">
+    ```bash
+    /entry path/to/file.py
+    ```
+  </Step>
+  
+  <Step title="Run individual tools">
+    ```bash
+    # Test Prettier
+    prettier --write file.js
+    
+    # Test Ruff
+    ruff check --config /ruff.toml file.py
+    
+    # Test ktfmt
+    java -jar /ktfmt --google-style file.kt
+    ```
+  </Step>
+</Steps>
+
+### Inspect Hook Dependencies
+
+The dependency graph is defined in `entry.ts`. Common chains:
+
+```
+Python:  Sed → Autoflake → Isort → Black
+                        └→ Ruff
+
+JS/TS:   Sed → ESLint → Prettier
+
+Kotlin:  Sed → ktfmt
+```
+
+Reference: `entry.ts:129-482`
+
+### Build and Test Locally
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/duolingo/pre-commit-hooks.git
+    cd pre-commit-hooks
+    ```
+  </Step>
+  
+  <Step title="Build the image">
+    ```bash
+    docker build -t duolingo/pre-commit-hooks:dev .
+    ```
+  </Step>
+  
+  <Step title="Run tests">
+    ```bash
+    make test
+    ```
+    
+    This runs the hook on test files and verifies output matches expectations.
+    
+    Reference: `Makefile:49-63`
+  </Step>
+  
+  <Step title="Open shell for debugging">
+    ```bash
+    make shell
+    ```
+  </Step>
+</Steps>
+
+## Getting Help
+
+<CardGroup cols={2}>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/duolingo/pre-commit-hooks/issues">
+    Report bugs or request features
+  </Card>
+  
+  <Card title="Contributing" icon="code-pull-request" href="/advanced/contributing">
+    Learn how to contribute fixes
+  </Card>
+</CardGroup>
+
+<Note>
+  When reporting issues, include:
+  - Your `.pre-commit-config.yaml` configuration
+  - Output from `pre-commit run --verbose`
+  - File types being processed
+  - Operating system and Docker version
+</Note>

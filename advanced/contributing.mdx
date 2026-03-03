@@ -1,0 +1,560 @@
+---
+title: Contributing
+description: How to contribute to the Duolingo pre-commit hooks project
+---
+
+We welcome contributions to improve the Duolingo pre-commit hooks! This guide explains how to contribute effectively.
+
+## Repository Information
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/duolingo/pre-commit-hooks">
+  https://github.com/duolingo/pre-commit-hooks
+</Card>
+
+The repository contains:
+- Dockerfile for the multi-language image
+- TypeScript entry point for parallel execution
+- Configuration files for all formatters/linters
+- Test suite for validating changes
+- Makefile for building and testing
+
+## Ways to Contribute
+
+<CardGroup cols={2}>
+  <Card title="Report Bugs" icon="bug">
+    Found an issue? Open a GitHub issue with details.
+  </Card>
+  
+  <Card title="Suggest Features" icon="lightbulb">
+    Have an idea? Propose new formatters or optimizations.
+  </Card>
+  
+  <Card title="Fix Issues" icon="wrench">
+    Browse open issues and submit fixes.
+  </Card>
+  
+  <Card title="Update Dependencies" icon="arrow-up">
+    Help keep formatters and linters up to date.
+  </Card>
+</CardGroup>
+
+## Development Workflow
+
+<Steps>
+  <Step title="Fork and Clone">
+    ```bash
+    # Fork the repository on GitHub, then:
+    git clone https://github.com/YOUR_USERNAME/pre-commit-hooks.git
+    cd pre-commit-hooks
+    ```
+  </Step>
+  
+  <Step title="Create a Branch">
+    ```bash
+    git checkout -b feature/your-feature-name
+    # or
+    git checkout -b fix/issue-description
+    ```
+    
+    <Note>
+      Use descriptive branch names like `fix/ktfmt-oom`, `feat/add-swift-support`, or `docs/update-readme`.
+    </Note>
+  </Step>
+  
+  <Step title="Make Your Changes">
+    Edit the relevant files:
+    
+    - **Add/update formatters:** Modify `Dockerfile` and `entry.ts`
+    - **Fix bugs:** Update logic in `entry.ts`
+    - **Update dependencies:** Change version numbers in `Dockerfile`
+    - **Improve documentation:** Edit `README.md`
+  </Step>
+  
+  <Step title="Build and Test Locally">
+    ```bash
+    # Build the Docker image
+    docker build -t duolingo/pre-commit-hooks:dev .
+    
+    # Run the test suite
+    make test
+    
+    # Open a shell for manual testing
+    make shell
+    ```
+    
+    Reference: `Makefile:44-63`
+  </Step>
+  
+  <Step title="Update Tests if Needed">
+    If you modify formatting behavior, update test files:
+    
+    - `test/before/` - Input files before formatting
+    - `test/after/` - Expected output after formatting
+    
+    The test suite runs the hook on `before/` files and compares against `after/`.
+    
+    Reference: `Makefile:49-63`
+  </Step>
+  
+  <Step title="Commit Your Changes">
+    ```bash
+    git add -A
+    git commit -m "Brief description of your changes"
+    ```
+    
+    **Commit message guidelines:**
+    - Use present tense: "Add feature" not "Added feature"
+    - Be concise but descriptive
+    - Reference issue numbers: "Fix #123: Description"
+  </Step>
+  
+  <Step title="Push and Create PR">
+    ```bash
+    git push origin feature/your-feature-name
+    ```
+    
+    Then open a Pull Request on GitHub.
+  </Step>
+</Steps>
+
+## Testing Your Changes
+
+### Run the Test Suite
+
+The project includes an automated test suite:
+
+```bash
+make test
+```
+
+This command:
+1. Builds the Docker image
+2. Copies test files from `test/before/` to `actual/`
+3. Runs the hook on all test files
+4. Compares output with expected results in `test/after/`
+5. Reports any differences
+
+Reference: `Makefile:49-63`
+
+### Manual Testing
+
+<Accordion title="Test in a shell">
+  ```bash
+  make shell
+  ```
+  
+  This opens an interactive shell inside the container where you can:
+  
+  ```bash
+  # Test the entry point
+  /entry /test/before/hello.py
+  
+  # Test individual tools
+  prettier --write /test/before/hello.js
+  ruff check --config /ruff.toml /test/before/hello.py
+  ```
+</Accordion>
+
+<Accordion title="Test on a real repository">
+  1. Build your modified image:
+     ```bash
+     docker build -t duolingo/pre-commit-hooks:dev .
+     ```
+  
+  2. In a test repository, update `.pre-commit-config.yaml`:
+     ```yaml
+     - repo: local
+       hooks:
+         - id: duolingo-dev
+           name: Duolingo (dev)
+           entry: duolingo/pre-commit-hooks:dev /entry
+           language: docker_image
+           types: [text]
+     ```
+  
+  3. Run the hook:
+     ```bash
+     pre-commit run duolingo-dev --all-files
+     ```
+</Accordion>
+
+<Accordion title="Test with duolingo-dev hook ID">
+  The repository includes a `-dev` hook ID for testing:
+  
+  ```yaml
+  - repo: https://github.com/YOUR_USERNAME/pre-commit-hooks.git
+    rev: your-branch-name
+    hooks:
+      - id: duolingo-dev
+  ```
+  
+  This uses `language: docker` to build from your branch instead of pulling from Docker Hub.
+  
+  Reference: `.pre-commit-hooks.yaml:25-29`
+</Accordion>
+
+## Adding a New Formatter/Linter
+
+To add support for a new language or tool:
+
+<Steps>
+  <Step title="Install the tool in Dockerfile">
+    Add installation commands to the appropriate section:
+    
+    ```dockerfile
+    # For Python packages
+    pip3 install --break-system-packages new-formatter==1.0.0
+    
+    # For Node packages
+    npm install -g new-formatter@1.0.0
+    
+    # For static binaries
+    wget https://example.com/tool -O /usr/local/bin/tool
+    chmod +x /usr/local/bin/tool
+    ```
+    
+    Reference: `Dockerfile:46-108`
+  </Step>
+  
+  <Step title="Add hook definition in entry.ts">
+    ```typescript
+    const enum HookName {
+      // ... existing hooks
+      NewFormatter = "new-formatter",
+    }
+    
+    const HOOKS: Record<HookName, Hook> = {
+      // ... existing hooks
+      [HookName.NewFormatter]: {
+        action: sources => run(
+          "new-formatter",
+          "--config", "/config-file",
+          "--write",
+          ...sources
+        ),
+        include: /\.newlang$/,
+        runAfter: [HookName.Sed],  // Optional dependencies
+      },
+    };
+    ```
+    
+    Reference: `entry.ts:79-482`
+  </Step>
+  
+  <Step title="Add configuration file if needed">
+    If the tool requires a config file, create it in the repository root:
+    
+    ```bash
+    touch .new-formatter-config
+    ```
+    
+    Then copy it in the Dockerfile:
+    ```dockerfile
+    COPY .new-formatter-config .
+    ```
+  </Step>
+  
+  <Step title="Add test files">
+    Create test input and expected output:
+    
+    ```bash
+    # Input file
+    echo 'unformatted code' > test/before/hello.newlang
+    
+    # Expected formatted output
+    echo 'formatted code' > test/after/hello.newlang
+    ```
+  </Step>
+  
+  <Step title="Update README.md">
+    Add the tool to the list with version number:
+    
+    ```markdown
+    - [new-formatter](https://github.com/example/new-formatter) v1.0.0 for NewLang
+    ```
+    
+    Reference: `README.md:8-31`
+  </Step>
+  
+  <Step title="Test and submit">
+    ```bash
+    make test
+    git add -A
+    git commit -m "Add support for NewLang via new-formatter"
+    git push origin feature/add-newlang-support
+    ```
+  </Step>
+</Steps>
+
+## Updating Dependencies
+
+When updating a formatter/linter version:
+
+<Steps>
+  <Step title="Update version in Dockerfile">
+    ```dockerfile
+    # Before
+    pip3 install ruff==0.7.3
+    
+    # After
+    pip3 install ruff==0.8.0
+    ```
+  </Step>
+  
+  <Step title="Update version in README.md">
+    ```markdown
+    # Before
+    - [Ruff](https://docs.astral.sh/ruff/) v0.7.3 for Python 3
+    
+    # After
+    - [Ruff](https://docs.astral.sh/ruff/) v0.8.0 for Python 3
+    ```
+  </Step>
+  
+  <Step title="Test for behavior changes">
+    ```bash
+    make test
+    ```
+    
+    If output changes, update test files in `test/after/` to match new behavior.
+  </Step>
+  
+  <Step title="Note breaking changes">
+    If the update changes formatting in a breaking way, mention this in:
+    - Commit message
+    - Pull request description
+    - Release notes (when creating a new version)
+  </Step>
+</Steps>
+
+## Code Style Guidelines
+
+### TypeScript (entry.ts)
+
+- Use strict TypeScript settings (already configured in compilation)
+- Prefer `async/await` over raw promises
+- Use descriptive variable names
+- Add comments for complex logic
+- Use const for immutable values
+
+Reference: `entry.ts:6-10` (compilation flags)
+
+### Dockerfile
+
+- Pin all versions explicitly
+- Group related commands in single RUN layers
+- Clean up build artifacts and caches
+- Add comments explaining non-obvious steps
+
+Reference: `Dockerfile:1-135`
+
+### Commit Messages
+
+**Good examples:**
+```
+Add support for Swift via swift-format
+Fix ktfmt OOM error with large repos
+Update Prettier to v3.6.0
+Refactor hook dependency resolution
+```
+
+**Avoid:**
+```
+Update
+Fixed bug
+Changes
+```
+
+## Pull Request Guidelines
+
+### PR Description Template
+
+```markdown
+## Description
+Brief summary of changes
+
+## Motivation
+Why is this change needed?
+
+## Changes
+- List specific changes made
+- Include any breaking changes
+
+## Testing
+How did you test this?
+
+## Checklist
+- [ ] Tests pass locally (`make test`)
+- [ ] README.md updated if needed
+- [ ] Test files updated if behavior changed
+- [ ] Dockerfile versions are pinned
+```
+
+### Review Process
+
+<Steps>
+  <Step title="Automated Checks">
+    GitHub Actions will run:
+    - Docker build verification
+    - Test suite execution
+    
+    Ensure these pass before requesting review.
+  </Step>
+  
+  <Step title="Code Review">
+    Maintainers will review:
+    - Code quality and style
+    - Test coverage
+    - Documentation updates
+    - Performance impact
+  </Step>
+  
+  <Step title="Address Feedback">
+    ```bash
+    # Make requested changes
+    git add -A
+    git commit -m "Address review feedback"
+    git push origin feature/your-feature-name
+    ```
+  </Step>
+  
+  <Step title="Merge">
+    Once approved, maintainers will merge your PR.
+  </Step>
+</Steps>
+
+## Release Process
+
+<Warning>
+  Only repository maintainers can create releases. This section is for reference.
+</Warning>
+
+Releases are created using the Makefile:
+
+```bash
+make release V=1.14.0
+```
+
+This command:
+1. Validates the environment (maintainer access, clean working tree)
+2. Updates version references in all files
+3. Creates a Git commit with message "Release 1.14.0"
+4. Creates a Git tag
+
+Reference: `Makefile:7-27`
+
+### Publishing to Docker Hub
+
+```bash
+make push
+```
+
+This:
+1. Logs into Docker Hub
+2. Sets up buildx for multi-architecture builds
+3. Builds for linux/amd64 and linux/arm64
+4. Pushes with tags `:latest` and `:1.14.0`
+
+Reference: `Makefile:32-41`
+
+## Design Principles
+
+When contributing, keep these principles in mind:
+
+<Accordion title="1. Auto-fix only">
+  Enable only rules that can be automatically fixed. Disable rules that require manual corrections.
+  
+  **Rationale:** Minimize developer friction. The hook should fix issues, not just report them.
+  
+  Reference: `README.md:33-34`
+</Accordion>
+
+<Accordion title="2. Parallel execution">
+  Hooks should run in parallel when possible. Use `runAfter` only when necessary.
+  
+  **Rationale:** Maximize performance by utilizing multiple CPU cores.
+  
+  Reference: `entry.ts:554-592`
+</Accordion>
+
+<Accordion title="3. Minimal image size">
+  Remove build dependencies and caches. Use multi-stage builds.
+  
+  **Rationale:** Faster downloads and lower bandwidth usage.
+  
+  Reference: `Dockerfile:14-26` (jlink optimization)
+</Accordion>
+
+<Accordion title="4. Version pinning">
+  Pin exact versions for all dependencies.
+  
+  **Rationale:** Ensure reproducible builds and prevent unexpected breaking changes.
+  
+  Reference: `Dockerfile:46-108`
+</Accordion>
+
+<Accordion title="5. Graceful degradation">
+  Skip hooks that don't apply rather than failing.
+  
+  **Example:** Black runs only on Python 2, Ruff only on Python 3.
+  
+  Reference: `entry.ts:145-162, 281-289`
+</Accordion>
+
+## Common Contribution Scenarios
+
+<Accordion title="Fix a tool's configuration">
+  1. Identify the config file (e.g., `ruff.toml`, `eslint.config.js`)
+  2. Make changes
+  3. Update test files if behavior changes
+  4. Run `make test`
+  5. Submit PR
+</Accordion>
+
+<Accordion title="Optimize memory usage">
+  Examples:
+  - Batch file processing (see ktfmt)
+  - Limit heap size (see ktfmt `-Xmx256m`)
+  - Process files sequentially instead of in parallel
+  
+  Reference: `entry.ts:228-244`
+</Accordion>
+
+<Accordion title="Add a new file type to an existing hook">
+  1. Update the `include` regex in `entry.ts`
+  2. Add test files for the new type
+  3. Run `make test`
+  4. Update README if it's a significant addition
+</Accordion>
+
+<Accordion title="Fix a race condition">
+  See Terraform fmt example: process files individually instead of by directory.
+  
+  Reference: `entry.ts:455-470`
+</Accordion>
+
+## Questions and Support
+
+<CardGroup cols={2}>
+  <Card title="GitHub Discussions" icon="comments" href="https://github.com/duolingo/pre-commit-hooks/discussions">
+    Ask questions and discuss ideas
+  </Card>
+  
+  <Card title="GitHub Issues" icon="circle-exclamation" href="https://github.com/duolingo/pre-commit-hooks/issues">
+    Report bugs and request features
+  </Card>
+</CardGroup>
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0, the same license as the project.
+
+Reference: `LICENSE`
+
+## Acknowledgments
+
+<Note>
+  Thank you for considering contributing to the Duolingo pre-commit hooks! Your contributions help developers worldwide write better code.
+</Note>
+
+_Duolingo is hiring! If you enjoy working on developer tools, check out https://www.duolingo.com/careers_

@@ -1,0 +1,210 @@
+---
+title: Hook Arguments
+description: Configure hook behavior with command-line arguments for Python and Scala versions
+---
+
+The Duolingo pre-commit hook accepts optional command-line arguments to customize formatting behavior for different language versions.
+
+## Available Arguments
+
+<ParamField path="--python-version" type="string" default="3">
+  Specifies which Python version to target for formatting.
+  
+  - Set to `2` to use Black 21.12b0 and isort for Python 2 code
+  - Set to `3` (or omit) to use Ruff for Python 3 code
+  
+  **Note:** Python 2 support uses legacy formatters since Ruff only supports Python 3.
+</ParamField>
+
+<ParamField path="--scala-version" type="string" default="2.12">
+  Specifies which Scala dialect version to use with scalafmt.
+  
+  Common values:
+  - `2.12` - Scala 2.12 (default)
+  - `2.13` - Scala 2.13
+  - `3` or `3.0` - Scala 3
+  
+  The version is converted to a dialect (e.g., `scala212`, `scala213`, `scala3`).
+</ParamField>
+
+## Usage Examples
+
+### Python Version Configuration
+
+<Tabs>
+  <Tab title="Python 3 (Default)">
+    ```yaml .pre-commit-config.yaml
+    - repo: https://github.com/duolingo/pre-commit-hooks.git
+      rev: 1.13.3
+      hooks:
+        - id: duolingo
+          # Python 3 is the default, no args needed
+    ```
+    
+    Uses **Ruff** for formatting and linting.
+  </Tab>
+  
+  <Tab title="Python 2 (Legacy)">
+    ```yaml .pre-commit-config.yaml
+    - repo: https://github.com/duolingo/pre-commit-hooks.git
+      rev: 1.13.3
+      hooks:
+        - id: duolingo
+          args:
+            - --python-version=2
+    ```
+    
+    Uses **Black 21.12b0**, **autoflake**, and **isort** for Python 2 code.
+  </Tab>
+</Tabs>
+
+### Scala Version Configuration
+
+<Tabs>
+  <Tab title="Scala 2.12 (Default)">
+    ```yaml .pre-commit-config.yaml
+    - repo: https://github.com/duolingo/pre-commit-hooks.git
+      rev: 1.13.3
+      hooks:
+        - id: duolingo
+          # Scala 2.12 is the default
+    ```
+  </Tab>
+  
+  <Tab title="Scala 2.13">
+    ```yaml .pre-commit-config.yaml
+    - repo: https://github.com/duolingo/pre-commit-hooks.git
+      rev: 1.13.3
+      hooks:
+        - id: duolingo
+          args:
+            - --scala-version=2.13
+    ```
+  </Tab>
+  
+  <Tab title="Scala 3">
+    ```yaml .pre-commit-config.yaml
+    - repo: https://github.com/duolingo/pre-commit-hooks.git
+      rev: 1.13.3
+      hooks:
+        - id: duolingo
+          args:
+            - --scala-version=3
+    ```
+  </Tab>
+</Tabs>
+
+### Combined Configuration
+
+```yaml .pre-commit-config.yaml
+- repo: https://github.com/duolingo/pre-commit-hooks.git
+  rev: 1.13.3
+  hooks:
+    - id: duolingo
+      args:
+        - --python-version=2
+        - --scala-version=2.13
+```
+
+## Implementation Details
+
+### Argument Parsing
+
+Arguments are parsed from the command line in `entry.ts:524-534`:
+
+```typescript
+const sources: string[] = process.argv.slice(2);
+const args: Args = {};
+while (sources.length && /^--[\w-]+=./.test(sources[0])) {
+  const arg = sources.shift();
+  if (arg) {
+    const matches = arg.match(/--([^=]+)=(.+)/);
+    if (matches && matches[1] && matches[2]) {
+      args[matches[1] as Arg] = matches[2] as string;
+    }
+  }
+}
+```
+
+### How Arguments Affect Formatting
+
+<AccordionGroup>
+  <Accordion title="Python Version Detection">
+    When `--python-version=2` is specified:
+    
+    1. **Black 21.12b0** runs instead of Ruff (`entry.ts:145-162`)
+    2. **isort** runs for import sorting (`entry.ts:219-221`)
+    3. **autoflake** still runs for both versions
+    4. Ruff is skipped entirely (`entry.ts:281-284`)
+    
+    When `--python-version=3` or omitted:
+    
+    1. **Ruff** runs in two passes for formatting and linting
+    2. Black and isort are skipped
+    3. Custom transformations still apply (sed hook)
+  </Accordion>
+  
+  <Accordion title="Scala Version Dialect">
+    The Scala version is converted to a dialect for scalafmt (`entry.ts:294-314`):
+    
+    ```typescript
+    "runner.dialect": `scala${(args["scala-version"] ?? "2.12")
+      .split(".")
+      .slice(0, 2)
+      .join("")}`
+    ```
+    
+    Examples:
+    - `2.12` → `scala212`
+    - `2.13` → `scala213`
+    - `3.0` → `scala30`
+    - `3` → `scala3`
+    
+    This is passed to scalafmt's `--config-str` option along with other formatting settings.
+  </Accordion>
+</AccordionGroup>
+
+## Argument Type Definitions
+
+From `entry.ts:102-104`:
+
+```typescript
+type Args = Partial<Record<Arg, string>>;
+type Arg = "python-version" | "scala-version";
+```
+
+Only these two arguments are supported. Any other arguments will be ignored.
+
+<Note>
+  Arguments must use the format `--key=value` (with equals sign). The format `--key value` (space-separated) is not supported.
+</Note>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Monorepo with Mixed Python Versions" icon="code-branch">
+    Create separate hook entries for different directories:
+    
+    ```yaml
+    - id: duolingo
+      files: ^legacy/
+      args: [--python-version=2]
+    - id: duolingo
+      files: ^src/
+      # Python 3 by default
+    ```
+  </Card>
+  
+  <Card title="Scala Version Upgrades" icon="arrow-up">
+    When upgrading Scala versions:
+    
+    1. Update the `--scala-version` argument
+    2. Run `pre-commit run --all-files`
+    3. Review formatting changes carefully
+    4. Commit the reformatted code separately
+  </Card>
+</CardGroup>
+
+<Warning>
+  Changing the Python version argument will cause widespread formatting changes across your codebase. Always run with `--all-files` and commit the reformatting separately from functional changes.
+</Warning>

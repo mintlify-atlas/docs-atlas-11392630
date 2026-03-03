@@ -1,0 +1,234 @@
+---
+title: JavaScript & TypeScript
+description: Prettier and ESLint configuration for JavaScript and TypeScript files
+---
+
+JavaScript and TypeScript files are formatted with **Prettier** and linted with **ESLint**, featuring modern plugins and autofixable rules.
+
+## Prettier
+
+Prettier formats all JavaScript, TypeScript, and related files with consistent options.
+
+### Versions
+
+- **Prettier**: 3.5.3
+- **@prettier/plugin-xml**: 3.4.1 (for XML in non-JS files)
+
+### File Patterns
+
+<Tabs>
+  <Tab title="JavaScript">
+    - `*.js` - JavaScript files
+    - `*.jsx` - React JSX files
+    
+    Uses ES5 trailing commas for maximum compatibility.
+  </Tab>
+  <Tab title="TypeScript & Others">
+    - `*.ts` - TypeScript files
+    - `*.tsx` - React TypeScript files
+    - `*.css` - Stylesheets
+    - `*.html`, `*.htm` - HTML files
+    - `*.md`, `*.markdown` - Markdown
+    - `*.scss` - Sass files
+    - `*.xml` - XML files
+    - `*.yml`, `*.yaml` - YAML files
+  </Tab>
+</Tabs>
+
+### Configuration Options
+
+All Prettier invocations use these CLI options (defined in `PRETTIER_OPTIONS` in entry.ts:16-36):
+
+```bash
+prettier \
+  --arrow-parens avoid \
+  --cache-location /tmp/prettier-cache \
+  --end-of-line auto \
+  --ignore-path /emptyfile \
+  --log-level warn \
+  --no-config \
+  --no-editorconfig \
+  --object-wrap collapse \
+  --write
+```
+
+<Info>
+  **Why `--no-config`?** This forces Prettier's default behavior, ensuring consistency across all repositories without requiring local configuration files.
+</Info>
+
+### Exclusions
+
+Minified JavaScript files are automatically excluded based on this regex pattern:
+
+```javascript
+/\bmin\b|\.(custom|pack)\./
+```
+
+This excludes files like:
+- `jquery.min.js`
+- `bundle.custom.js`
+- `app.pack.js`
+
+### Execution Order
+
+Prettier runs **after** ESLint to avoid conflicts:
+
+```mermaid
+graph LR
+    A[sed] --> B[ESLint --fix]
+    B --> C[Prettier]
+```
+
+## ESLint
+
+ESLint provides autofixing for code quality issues with carefully selected rules.
+
+### Version
+
+- **ESLint**: 9.23.0
+- **typescript-eslint**: 8.29.0
+- **eslint-plugin-jsdoc**: 50.6.9
+- **eslint-plugin-sort-keys**: 2.3.5
+- **eslint-plugin-unicorn**: 56.0.1
+
+### File Patterns
+
+- `*.js`, `*.jsx` - JavaScript files
+- `*.ts`, `*.tsx` - TypeScript files
+
+**Excludes**: Minified files (same pattern as Prettier)
+
+### Configuration
+
+The configuration is defined in `eslint.config.js` and includes:
+
+#### Native ESLint Rules (Selection)
+
+```javascript
+"arrow-body-style": ["error", "as-needed"],
+curly: ["error", "all"],
+eqeqeq: ["error", "always"],
+"no-else-return": "error",
+"no-lonely-if": "error",
+"no-var": "error",
+"object-shorthand": ["error", "always"],
+"prefer-arrow-callback": "error",
+"prefer-const": "error",
+"prefer-template": "error",
+"sort-imports": ["error", { ignoreDeclarationSort: true }],
+yoda: ["error", "never"],
+```
+
+#### TypeScript Rules
+
+```javascript
+"@typescript-eslint/array-type": ["error", { default: "array" }],
+"@typescript-eslint/consistent-indexed-object-style": ["error", "record"],
+"@typescript-eslint/explicit-member-accessibility": ["error", {...}],
+"@typescript-eslint/no-inferrable-types": "error",
+"@typescript-eslint/prefer-as-const": "error",
+```
+
+#### JSDoc Rules
+
+```javascript
+"jsdoc/check-alignment": "error",
+"jsdoc/check-param-names": "error",
+"jsdoc/multiline-blocks": ["error", {...}],
+"jsdoc/no-types": "error",  // Use TypeScript types instead
+"jsdoc/require-asterisk-prefix": "error",
+```
+
+#### Unicorn Rules
+
+Modern JavaScript best practices:
+
+```javascript
+"unicorn/catch-error-name": ["error", { name: "ex" }],
+"unicorn/consistent-destructuring": "error",
+"unicorn/no-negated-condition": "error",
+"unicorn/prefer-array-index-of": "error",
+"unicorn/prefer-date-now": "error",
+"unicorn/prefer-math-min-max": "error",
+"unicorn/prefer-optional-catch-binding": "error",
+"unicorn/prefer-string-starts-ends-with": "error",
+```
+
+#### Sort Keys
+
+Automatically sorts object keys alphabetically:
+
+```javascript
+"sort-keys/sort-keys-fix": ["error", "asc", { natural: true }]
+```
+
+### Auto-fixing Behavior
+
+ESLint runs with `--fix` flag and **swallows non-autofixable errors** (entry.ts:177-191):
+
+```typescript
+try {
+  await run("eslint", "--fix", "--config", "/eslint.config.js", ...sources);
+} catch {
+  // We swallow nonzero exit codes because we care only about autofixable
+  // errors (which should now be fixed), not about non-autofixable errors
+}
+```
+
+<Note>
+  This means ESLint will fix what it can and silently ignore violations that require manual intervention.
+</Note>
+
+### Performance Note
+
+Type-aware rules are intentionally **disabled** because they're prohibitively slow. Only rules that don't require type information are enabled.
+
+## Example Transformations
+
+<Tabs>
+  <Tab title="Arrow Functions">
+    ```javascript
+    // Before
+    const fn = () => { return x + 1; };
+    
+    // After
+    const fn = () => x + 1;
+    ```
+  </Tab>
+  <Tab title="Object Shorthand">
+    ```javascript
+    // Before
+    const obj = { x: x, y: y };
+    
+    // After
+    const obj = { x, y };
+    ```
+  </Tab>
+  <Tab title="Prefer Const">
+    ```javascript
+    // Before
+    let unchangedValue = 42;
+    
+    // After
+    const unchangedValue = 42;
+    ```
+  </Tab>
+  <Tab title="Template Strings">
+    ```javascript
+    // Before
+    const msg = "Hello " + name + "!";
+    
+    // After
+    const msg = `Hello ${name}!`;
+    ```
+  </Tab>
+  <Tab title="Sorted Keys">
+    ```javascript
+    // Before
+    const config = { port: 3000, host: "localhost", debug: true };
+    
+    // After
+    const config = { debug: true, host: "localhost", port: 3000 };
+    ```
+  </Tab>
+</Tabs>

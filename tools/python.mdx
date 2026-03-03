@@ -1,0 +1,290 @@
+---
+title: Python
+description: Ruff, Black, autoflake, and isort for Python code formatting and linting
+---
+
+Python files are processed with a comprehensive toolchain: **Ruff** for modern linting and formatting, **Black** for Python 2 legacy code, **autoflake** for removing unused imports, and **isort** for import sorting.
+
+## Tool Chain Overview
+
+Python tools run in this specific order:
+
+```mermaid
+graph LR
+    A[sed] --> B[autoflake]
+    B --> C[isort]
+    C --> D[Black/Ruff]
+```
+
+## Ruff (Python 3+)
+
+Ruff is a fast, modern Python linter and formatter that replaces many legacy tools.
+
+### Version
+
+- **Ruff**: 0.7.3
+
+### File Pattern
+
+- `*.py` - Python files (Python 3.7+ only)
+
+### Configuration
+
+Defined in `ruff.toml`:
+
+```toml
+cache-dir = "/tmp/.cache/ruff"
+fix-only = true
+line-length = 100
+target-version = "py37"
+```
+
+### Enabled Rule Sets
+
+Ruff selects comprehensive rule categories:
+
+- **B** - flake8-bugbear (bug detection)
+- **C4** - flake8-comprehensions (list/dict comprehensions)
+- **D** - pydocstyle (docstring conventions)
+- **E** - pycodestyle errors
+- **F** - Pyflakes (basic linting)
+- **I** - isort (import sorting)
+- **ISC** - flake8-implicit-str-concat
+- **PERF** - Performance anti-patterns
+- **PIE** - flake8-pie (misc best practices)
+- **PL** - Pylint rules
+- **Q** - flake8-quotes
+- **RUF** - Ruff-specific rules
+- **SIM** - flake8-simplify
+- **UP** - pyupgrade (modern Python syntax)
+
+### Ignored Rules
+
+```toml
+ignore = [
+  "ISC001",  # May conflict with formatter
+  "F401",    # Disabled in favor of autoflake for type hint comments
+  "SIM101",  # Bug: incorrectly removes conditions
+  "SIM114",  # Bug: deletes comments
+]
+```
+
+### isort Configuration
+
+```toml
+[lint.isort]
+combine-as-imports = true
+known-third-party = ["*_backend_client"]  # Apiary clients
+```
+
+### pydocstyle Convention
+
+```toml
+[lint.pydocstyle]
+convention = "pep257"
+```
+
+### Multi-pass Execution
+
+Ruff runs **twice** to handle interdependent fixes (entry.ts:280-290):
+
+```typescript
+for (let i = 0; i < 2; ++i) {
+  await run("ruff", "check", "--config", "/ruff.toml", ...sources);
+  await run("ruff", "format", "--config", "/ruff.toml", ...sources);
+}
+```
+
+<Info>
+  **Why two passes?** Some Ruff fixes create new opportunities for other rules to apply. Running twice ensures all applicable fixes are made.
+</Info>
+
+## Black (Python 2 Legacy)
+
+Black is used **only** for Python 2 codebases, as Ruff doesn't support Python 2.
+
+### Version
+
+- **Black**: 21.12b0 (last version with Python 2 support)
+- **click**: 8.0.4 (pinned due to Black bug)
+
+### Activation
+
+Black only runs when `--python-version=2.x` is passed:
+
+```yaml
+# .pre-commit-config.yaml
+- repo: https://github.com/duolingo/pre-commit-hooks
+  hooks:
+    - id: duolingo
+      args: [--python-version=2.7]
+```
+
+### Configuration
+
+```bash
+black21 \
+  --fast \
+  --target-version py27 \
+  --config /emptyfile \
+  --line-length 100 \
+  --quiet
+```
+
+## autoflake
+
+Removes unused imports and variables automatically.
+
+### Version
+
+- **autoflake**: 1.7.8
+
+### Configuration Options
+
+```bash
+autoflake \
+  --ignore-init-module-imports \
+  --imports=attrs,boto,boto3,flask,pyramid,pytest,pytz,requests,simplejson,six \
+  --in-place \
+  --remove-duplicate-keys \
+  --remove-unused-variables
+```
+
+### Predefined Import List
+
+These imports are automatically removed if unused:
+- `attrs`
+- `boto`, `boto3`
+- `flask`
+- `pyramid`
+- `pytest`, `pytz`
+- `requests`
+- `simplejson`, `six`
+
+<Note>
+  autoflake runs **before** Ruff/Black to clean up imports first, allowing formatters to work on cleaner code.
+</Note>
+
+## isort (Python 2 Only)
+
+isort sorts imports, but **only** for Python 2 code. Ruff handles import sorting for Python 3+.
+
+### Version
+
+- **isort**: 5.13.2
+
+### Configuration
+
+Reads from `.editorconfig`:
+
+```ini
+[*.py]
+combine_as_imports=true
+force_grid_wrap=0
+include_trailing_comma=true
+multi_line_output=3
+```
+
+### Command
+
+```bash
+isort --settings /.editorconfig
+```
+
+<Info>
+  **Why only Python 2?** Ruff includes isort functionality for Python 3+, making a separate tool redundant.
+</Info>
+
+## Example Transformations
+
+<Tabs>
+  <Tab title="Empty Collections">
+    Custom `sed` transformations (from entry.ts:351-361):
+    
+    ```python
+    # Before
+    x = dict()
+    y = list()
+    z = tuple()
+    
+    # After
+    x = {}
+    y = []
+    z = ()
+    ```
+  </Tab>
+  <Tab title="Empty Sets">
+    ```python
+    # Before
+    s = set([])
+    fs = frozenset([])
+    
+    # After
+    s = set()
+    fs = frozenset()
+    ```
+  </Tab>
+  <Tab title="Python 3 Only">
+    These transformations only apply when NOT using `--python-version=2.x`:
+    
+    ```python
+    # Before
+    # -*- coding: utf-8 -*-
+    class MyClass(object):
+        pass
+    
+    # After
+    class MyClass:
+        pass
+    ```
+  </Tab>
+  <Tab title="Unused Imports">
+    autoflake removes unused imports:
+    
+    ```python
+    # Before
+    import os
+    import sys
+    import requests  # unused
+    
+    print(sys.version)
+    
+    # After
+    import sys
+    
+    print(sys.version)
+    ```
+  </Tab>
+  <Tab title="Import Sorting">
+    Ruff/isort organizes imports:
+    
+    ```python
+    # Before
+    from myapp import views
+    import sys
+    from django.http import HttpResponse
+    import os
+    
+    # After
+    import os
+    import sys
+    
+    from django.http import HttpResponse
+    
+    from myapp import views
+    ```
+  </Tab>
+</Tabs>
+
+## Python Version Detection
+
+The toolchain adapts based on the `--python-version` argument:
+
+| Argument | Tools Used | Notes |
+|----------|------------|-------|
+| Not specified or `3.x` | Ruff (check + format) | Modern Python |
+| `2.x` | autoflake → isort → Black | Legacy Python |
+
+<Warning>
+  Python 2 support is legacy only. Black 21.x will not receive updates. Migrate to Python 3 for the best experience.
+</Warning>

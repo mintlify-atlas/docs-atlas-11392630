@@ -1,0 +1,579 @@
+---
+title: sync-ai-rules
+description: Synchronizes AI coding rules from source directories to AI assistant configuration files
+---
+
+The `sync-ai-rules` hook automatically synchronizes AI coding rules from `.cursor/rules/` and `.code_review/` directories to AI assistant configuration files, ensuring all AI tools stay aware of the same coding conventions.
+
+## Overview
+
+This hook uses a plugin-based architecture to:
+
+1. **Parse rules** from source directories with specific frontmatter formats
+2. **Generate documentation** sections with formatted rules
+3. **Update target files** by replacing content between section markers
+
+### Target Files
+
+The hook updates these AI assistant configuration files:
+
+- `CLAUDE.md` - Claude Desktop and API configuration
+- `AGENTS.md` - Multi-agent system configuration
+- `.github/copilot-instructions.md` - GitHub Copilot instructions
+
+### Rule Sources
+
+<CardGroup cols={2}>
+  <Card title="Development Rules" icon="code">
+    **Source**: `.cursor/rules/*.mdc` files
+
+    **Format**: YAML frontmatter
+
+    **Section**: `<!-- DEVELOPMENT_RULES -->...<!-- /DEVELOPMENT_RULES -->`
+  </Card>
+
+  <Card title="Code Review Guidelines" icon="clipboard-check">
+    **Source**: `.code_review/*.md` files
+
+    **Format**: HTML comment frontmatter
+
+    **Section**: `<!-- CODE_REVIEW_GUIDELINES -->...<!-- /CODE_REVIEW_GUIDELINES -->`
+  </Card>
+</CardGroup>
+
+## Configuration
+
+Add the hook to your `.pre-commit-config.yaml`:
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3
+    hooks:
+      - id: sync-ai-rules
+```
+
+### Complete Example
+
+```yaml .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/duolingo/pre-commit-hooks.git
+    rev: 1.13.3
+    hooks:
+      # Sync AI rules whenever rule files change
+      - id: sync-ai-rules
+```
+
+The hook automatically runs only when relevant files change (`.cursor/rules/*.mdc` or `.code_review/*.md`).
+
+## Rule File Formats
+
+### Development Rules (.mdc)
+
+Development rules use YAML frontmatter in `.mdc` files:
+
+```markdown .cursor/rules/typescript-conventions.mdc
+---
+title: TypeScript Conventions
+category: code-style
+priority: high
+---
+
+# TypeScript Conventions
+
+Always use strict null checks and explicit return types for public APIs.
+
+## Examples
+
+\`\`\`typescript
+// Good
+function getUser(id: string): User | null {
+  return users.get(id) ?? null;
+}
+
+// Bad
+function getUser(id) {
+  return users.get(id);
+}
+\`\`\`
+```
+
+**Frontmatter fields**:
+- `title` (required) - Rule title
+- `category` (optional) - Grouping category
+- `priority` (optional) - Rule priority (high, medium, low)
+
+### Code Review Guidelines (.md)
+
+Code review guidelines use HTML comment frontmatter:
+
+```markdown .code_review/security.md
+<!--
+title: Security Review Checklist
+category: security
+-->
+
+# Security Review Checklist
+
+## Authentication
+
+- [ ] All endpoints require authentication
+- [ ] JWT tokens are validated on every request
+- [ ] Refresh tokens are rotated on use
+
+## Input Validation
+
+- [ ] User input is sanitized
+- [ ] SQL injection protection is in place
+- [ ] XSS protection is enabled
+```
+
+**Frontmatter fields**:
+- `title` (required) - Guideline title
+- `category` (optional) - Review category
+
+## Plugin Architecture
+
+The hook uses a plugin-based system defined in `sync_ai_rules/plugins.yaml`:
+
+<Tabs>
+  <Tab title="Pipelines">
+    ### Pipeline Configuration
+
+    From `plugins.yaml:3-30`:
+
+    ```yaml
+    pipelines:
+      - name: claude-skills
+        description: Generate Claude Code skills in .claude/skills/ directory
+        parser:
+          module: mdc_parser
+          class: MDCParser
+        generator:
+          module: skills_generator
+          class: SkillsGenerator
+
+      - name: development-rules
+        description: Generate development rules documentation from .cursor/rules/
+        parser:
+          module: mdc_parser
+          class: MDCParser
+        generator:
+          module: development_rules_generator
+          class: DevelopmentRulesGenerator
+
+      - name: code-review-guidelines
+        description: Generate code review guidelines from .code_review/
+        parser:
+          module: code_review_parser
+          class: CodeReviewParser
+        generator:
+          module: code_review_guidelines_generator
+          class: CodeReviewGuidelinesGenerator
+    ```
+
+    Each pipeline connects a **parser** (reads source files) with a **generator** (creates output).
+  </Tab>
+
+  <Tab title="Parsers">
+    ### Available Parsers
+
+    **MDCParser** (`sync_ai_rules/parsers/mdc_parser.py`)
+    - Parses `.mdc` files with YAML frontmatter
+    - Source directories: `.cursor/rules/`
+    - Extracts: title, category, priority, content
+
+    **CodeReviewParser** (`sync_ai_rules/parsers/code_review_parser.py`)
+    - Parses `.md` files with HTML comment frontmatter
+    - Source directories: `.code_review/`
+    - Extracts: title, category, content
+
+    ### Parser Interface
+
+    ```python
+    class InputParser(ABC):
+        @property
+        @abstractmethod
+        def name(self) -> str:
+            """Parser identifier"""
+
+        @property
+        @abstractmethod
+        def source_directories(self) -> list[str]:
+            """Directories to scan for rules"""
+
+        @abstractmethod
+        def can_parse(self, file_path: str) -> bool:
+            """Check if parser can handle this file"""
+
+        @abstractmethod
+        def parse(self, file_path: str, context: dict) -> RuleMetadata | None:
+            """Parse file and return rule metadata"""
+    ```
+  </Tab>
+
+  <Tab title="Generators">
+    ### Available Generators
+
+    **DevelopmentRulesGenerator**
+    - Generates markdown documentation from development rules
+    - Section markers: `<!-- DEVELOPMENT_RULES -->` / `<!-- /DEVELOPMENT_RULES -->`
+    - Target files: `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`
+
+    **CodeReviewGuidelinesGenerator**
+    - Generates markdown documentation from code review guidelines
+    - Section markers: `<!-- CODE_REVIEW_GUIDELINES -->` / `<!-- /CODE_REVIEW_GUIDELINES -->`
+    - Target files: `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`
+
+    **SkillsGenerator**
+    - Generates Claude Code skills in `.claude/skills/` directory
+    - Creates individual skill files from rules
+    - Multi-file generator (not section-based)
+
+    ### Generator Interface
+
+    ```python
+    class BaseGenerator(ABC):
+        @property
+        @abstractmethod
+        def name(self) -> str:
+            """Generator identifier"""
+
+        @abstractmethod
+        def get_section_markers(self) -> tuple[str, str]:
+            """Return (start_marker, end_marker) for section replacement"""
+
+        @abstractmethod
+        def generate(self, grouped_rules: dict, context: dict) -> str:
+            """Generate documentation content"""
+
+        @property
+        def is_multi_file(self) -> bool:
+            """Whether generator creates multiple files"""
+            return False
+    ```
+  </Tab>
+</Tabs>
+
+## Implementation Details
+
+### Execution Flow
+
+From `__main__.py:61-108`:
+
+```python
+def main():
+    """Main orchestration: load pipelines → parse → generate → update files."""
+    project_root = str(Path.cwd())
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    plugin_manager = PluginManager()
+    plugin_manager.load_plugins(script_dir)
+
+    # Process each pipeline
+    for pipeline in plugin_manager.pipelines:
+        print(f"Processing pipeline: {pipeline.name}")
+
+        # Scan and parse using pipeline's parser
+        all_rules = []
+        for rel_dir in pipeline.parser.source_directories:
+            source_dir = os.path.join(project_root, rel_dir)
+            print(f"  Scanning {rel_dir}...")
+            rules = scan_and_parse(pipeline.parser, source_dir, project_root)
+            all_rules.extend(rules)
+
+        if not all_rules:
+            print("  No rules found, skipping")
+            continue
+
+        # Group rules by category
+        grouped_rules = group_by_category(all_rules)
+        print(f"  Found {len(all_rules)} rules in {len(grouped_rules)} categories")
+
+        # Generate output
+        if pipeline.generator.is_multi_file:
+            pipeline.generator.generate_files(grouped_rules, project_root)
+        else:
+            content = pipeline.generator.generate(grouped_rules, {})
+            for filename in pipeline.generator.default_filenames:
+                file_path = os.path.join(project_root, filename)
+                success, message = update_documentation_file(
+                    file_path, content, pipeline.generator.get_section_markers()
+                )
+                status = "✓" if success else "✗"
+                print(f"  {status} {message}")
+
+    print("\n✓ Rules synchronization completed!")
+```
+
+### File Update Mechanism
+
+The `file_updater.py` module handles safe file updates:
+
+1. **Read file** - Load existing content
+2. **Find markers** - Locate section start and end markers
+3. **Replace section** - Substitute content between markers
+4. **Write atomically** - Save updated file
+
+If section markers don't exist, the file is not modified.
+
+### Hook Metadata
+
+From `.pre-commit-hooks.yaml:13-18`:
+
+```yaml
+- id: sync-ai-rules
+  name: Sync AI Rules
+  entry: duolingo/pre-commit-hooks:1.13.3 sh -c "PYTHONPATH=/ python3 -m sync_ai_rules"
+  language: docker_image
+  files: (^\.cursor/rules/.*\.mdc$|^\.code_review/.*\.md$)
+  pass_filenames: false
+```
+
+**Key properties**:
+- `language: docker_image` - Runs in Docker container
+- `files` - Only triggers on changes to rule files
+- `pass_filenames: false` - Scans directories instead of processing individual files
+
+## Directory Structure
+
+### Source Directories
+
+```
+.
+├── .cursor/
+│   └── rules/
+│       ├── typescript-conventions.mdc
+│       ├── python-style.mdc
+│       └── security/
+│           └── authentication.mdc
+└── .code_review/
+    ├── security.md
+    ├── performance.md
+    └── accessibility.md
+```
+
+### Target Files
+
+```
+.
+├── CLAUDE.md
+├── AGENTS.md
+└── .github/
+    └── copilot-instructions.md
+```
+
+### Generated Skills (Optional)
+
+```
+.
+└── .claude/
+    └── skills/
+        ├── typescript-conventions.md
+        ├── python-style.md
+        └── security/
+            └── authentication.md
+```
+
+## Extending the System
+
+### Creating a Custom Parser
+
+1. Create a new parser in `sync_ai_rules/parsers/`:
+
+```python sync_ai_rules/parsers/custom_parser.py
+from sync_ai_rules.core.parser_interface import InputParser
+from sync_ai_rules.core.rule_metadata import RuleMetadata
+
+class CustomParser(InputParser):
+    @property
+    def name(self) -> str:
+        return "custom-format"
+
+    @property
+    def source_directories(self) -> list[str]:
+        return [".custom-rules"]
+
+    def can_parse(self, file_path: str) -> bool:
+        return file_path.endswith(".custom")
+
+    def parse(self, file_path: str, context: dict) -> RuleMetadata | None:
+        # Parse your custom format
+        with open(file_path, 'r') as f:
+            content = f.read()
+
+        return RuleMetadata(
+            title="My Rule",
+            content=content,
+            category=context.get("category", "general"),
+            source_file=context["relative_path"],
+        )
+```
+
+### Creating a Custom Generator
+
+2. Create a new generator in `sync_ai_rules/generators/`:
+
+```python sync_ai_rules/generators/custom_generator.py
+from sync_ai_rules.generators.base_generator import BaseGenerator
+
+class CustomGenerator(BaseGenerator):
+    @property
+    def name(self) -> str:
+        return "custom-output"
+
+    @property
+    def default_filenames(self) -> list[str]:
+        return ["CUSTOM_RULES.md"]
+
+    def get_section_markers(self) -> tuple[str, str]:
+        return ("<!-- CUSTOM_RULES -->", "<!-- /CUSTOM_RULES -->")
+
+    def generate(self, grouped_rules: dict, context: dict) -> str:
+        lines = []
+        for category, rules in grouped_rules.items():
+            lines.append(f"## {category}\n")
+            for rule in rules:
+                lines.append(f"### {rule.title}\n")
+                lines.append(f"{rule.content}\n")
+        return "\n".join(lines)
+```
+
+### Registering a Custom Pipeline
+
+3. Add to `sync_ai_rules/plugins.yaml`:
+
+```yaml
+pipelines:
+  # ... existing pipelines ...
+
+  - name: custom-pipeline
+    description: Process custom format rules
+    parser:
+      module: custom_parser
+      class: CustomParser
+    generator:
+      module: custom_generator
+      class: CustomGenerator
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Hook not running on rule changes">
+    Check the `files` pattern in your `.pre-commit-config.yaml`. The hook only runs when files matching these patterns change:
+    - `.cursor/rules/*.mdc`
+    - `.code_review/*.md`
+
+    To test manually:
+    ```bash
+    pre-commit run sync-ai-rules --all-files
+    ```
+  </Accordion>
+
+  <Accordion title="Section markers not found">
+    The hook only updates files that contain the appropriate section markers:
+
+    **For development rules**:
+    ```markdown
+    <!-- DEVELOPMENT_RULES -->
+    (content will be replaced here)
+    <!-- /DEVELOPMENT_RULES -->
+    ```
+
+    **For code review guidelines**:
+    ```markdown
+    <!-- CODE_REVIEW_GUIDELINES -->
+    (content will be replaced here)
+    <!-- /CODE_REVIEW_GUIDELINES -->
+    ```
+
+    Add these markers to your target files if they're missing.
+  </Accordion>
+
+  <Accordion title="Rules not being parsed">
+    Common issues:
+    - **Invalid frontmatter**: Ensure YAML or HTML comment syntax is correct
+    - **Wrong directory**: Rules must be in `.cursor/rules/` or `.code_review/`
+    - **Wrong extension**: Development rules must be `.mdc`, code review must be `.md`
+    - **Generated directories**: Files in `generated/` or `personal/` subdirectories are skipped
+
+    To debug, run with verbose output:
+    ```bash
+    pre-commit run sync-ai-rules --all-files --verbose
+    ```
+  </Accordion>
+
+  <Accordion title="Python import errors">
+    The hook runs in a Docker container with `PYTHONPATH=/`, so the `sync_ai_rules` module must be at the container root.
+
+    This is handled automatically by the Dockerfile, but if you're running locally:
+    ```bash
+    PYTHONPATH=/ python3 -m sync_ai_rules
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Example Output
+
+### Development Rules Section
+
+```markdown
+<!-- DEVELOPMENT_RULES -->
+## Code Style
+
+### TypeScript Conventions
+*Category: code-style | Priority: high*
+
+Always use strict null checks and explicit return types for public APIs.
+
+### Python Style
+*Category: code-style | Priority: medium*
+
+Follow PEP 8 with line length of 100 characters.
+
+## Security
+
+### Authentication
+*Category: security | Priority: high*
+
+All API endpoints must require authentication.
+<!-- /DEVELOPMENT_RULES -->
+```
+
+### Code Review Guidelines Section
+
+```markdown
+<!-- CODE_REVIEW_GUIDELINES -->
+## Security
+
+### Security Review Checklist
+*Category: security*
+
+- [ ] All endpoints require authentication
+- [ ] JWT tokens are validated on every request
+- [ ] Input is sanitized against SQL injection and XSS
+
+## Performance
+
+### Performance Review Checklist
+*Category: performance*
+
+- [ ] Database queries are optimized
+- [ ] N+1 queries are eliminated
+- [ ] Response times are under 200ms
+<!-- /CODE_REVIEW_GUIDELINES -->
+```
+
+## Related Hooks
+
+- [duolingo](/hooks/duolingo) - Main formatting hook
+- [precache-docker](/hooks/precache-docker) - Docker optimization hook
+
+<Note>
+  The hook automatically skips files in `generated/` and `personal/` subdirectories to avoid processing auto-generated or personal rule files.
+</Note>
+
+<Warning>
+  This hook modifies AI configuration files in place. Always review the generated content before committing, especially when setting up the hook for the first time.
+</Warning>
