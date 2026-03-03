@@ -1,0 +1,90 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Duolingo Pre-commit Hooks",
+  "projectDescription": "A comprehensive collection of pre-commit hooks that run code formatters and linters in parallel for 15+ languages",
+  "theme": "aspen",
+  "primaryColor": "#58CC02",
+  "lightColor": "#89E219",
+  "darkColor": "#58A700",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Hooks",
+        "pages": [
+          "hooks/duolingo",
+          "hooks/precache-docker",
+          "hooks/sync-ai-rules"
+        ]
+      },
+      {
+        "group": "Configuration",
+        "pages": [
+          "configuration/hook-arguments",
+          "configuration/editorconfig",
+          "configuration/excluding-files"
+        ]
+      },
+      {
+        "group": "Supported Tools",
+        "pages": [
+          "tools/overview",
+          "tools/javascript-typescript",
+          "tools/python",
+          "tools/java-kotlin",
+          "tools/scala",
+          "tools/go",
+          "tools/shell",
+          "tools/terraform-packer",
+          "tools/cpp-protobuf",
+          "tools/markup-data",
+          "tools/custom-transformations"
+        ]
+      },
+      {
+        "group": "Advanced",
+        "pages": [
+          "advanced/docker-image",
+          "advanced/architecture",
+          "advanced/troubleshooting",
+          "advanced/contributing"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Runs 20+ formatters and linters in parallel across 15+ programming languages",
+    "Docker-based for consistent formatting across all developer machines and CI",
+    "Zero configuration required - enforces Duolingo's code style automatically",
+    "Optimized Docker image precaching for faster pre-commit runs",
+    "AI rules synchronization across multiple AI coding assistants",
+    "Custom regex transformations for language-specific code cleanup"
+  ],
+  "publicApiSurface": [
+    "duolingo hook - Main code formatting hook",
+    "precache-docker hook - Docker image precaching optimization",
+    "sync-ai-rules hook - AI rules synchronization",
+    "--python-version argument - Python 2 or 3 formatting mode",
+    "--scala-version argument - Scala version selector",
+    "Prettier v3.5.3 - CSS, HTML, JS, JSX, Markdown, Sass, TypeScript, XML, YAML",
+    "ESLint v9.23.0 - JavaScript and TypeScript linting",
+    "Ruff v0.7.3 - Python 3 formatting and linting",
+    "Black v21.12b0 - Python 2 formatting",
+    "google-java-format v1.24.0 - Java formatting",
+    "ktfmt v0.53 - Kotlin formatting",
+    "scalafmt v3.8.3 - Scala formatting",
+    "gofmt v1.23.3 - Go formatting",
+    "shfmt v3.10.0 - Shell script formatting",
+    "terraform fmt v1.9.8 - Terraform formatting",
+    "ClangFormat v18.1.8 - C++ and Protobuf formatting",
+    "SVGO v3.3.2 - SVG optimization",
+    "Taplo v0.9.3 - TOML formatting"
+  ]
+}
